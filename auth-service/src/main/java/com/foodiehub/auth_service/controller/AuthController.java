@@ -1,5 +1,7 @@
 package com.foodiehub.auth_service.controller;
 
+import com.foodiehub.auth_service.dto.LoginRequest;
+import com.foodiehub.auth_service.dto.LoginResponse;
 import com.foodiehub.auth_service.dto.RegisterRequest;
 import com.foodiehub.auth_service.dto.UserProfileResponse;
 import com.foodiehub.auth_service.model.Role;
@@ -35,10 +37,10 @@ public class AuthController {
                 .body(authService.register(request, Role.AGENT));
     }
 
-//    @PostMapping("/login")
-//    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
-//        return ResponseEntity.ok(authService.login(request));
-//    }
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+        return ResponseEntity.ok(authService.login(request));
+    }
 
     @GetMapping("/user")
     public ResponseEntity<String> me() {
