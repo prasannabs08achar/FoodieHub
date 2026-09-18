@@ -1,6 +1,8 @@
 package com.foodiehub.auth_service.config;
 
+import com.foodiehub.auth_service.authenticationProviders.JwtAuthenticationProvider;
 import com.foodiehub.auth_service.security.JwtAuthenticationFilter;
+import com.foodiehub.auth_service.security.JwtValidationFilter;
 import com.foodiehub.auth_service.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -25,6 +27,7 @@ import java.util.Arrays;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
+    private final JwtUtil jwtUtil;
     private final UserDetailsService userDetailsService;
 
     @Bean
@@ -38,10 +41,16 @@ public class SecurityConfig {
         return provider;
       }
 
+      @Bean
+      public JwtAuthenticationProvider jwtAuthenticationProvider(){
+        return new JwtAuthenticationProvider(jwtUtil,userDetailsService);
+      }
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, AuthenticationManager authenticationManager,
                                                    JwtUtil jwtUtil) throws Exception {
 //        JwtAuthenticationFilter jwtAuthFilter = new JwtAuthenticationFilter(authenticationManager, jwtUtil);
+       JwtValidationFilter jwtValidationFilter=new JwtValidationFilter(authenticationManager);
         http
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -53,7 +62,8 @@ public class SecurityConfig {
                                 "/api/auth/login"
                                 ).permitAll()
                         .anyRequest().authenticated()
-                );
+                )
+                .addFilterBefore(jwtValidationFilter, UsernamePasswordAuthenticationFilter.class);
 //                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -61,7 +71,7 @@ public class SecurityConfig {
     @Bean
     public AuthenticationManager authenticationManager() {
         return new ProviderManager(
-                Arrays.asList(daoAuthenticationProvider())
+                Arrays.asList(daoAuthenticationProvider(),jwtAuthenticationProvider())
         );
     }
 }
