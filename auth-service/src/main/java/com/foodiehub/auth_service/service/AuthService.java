@@ -7,6 +7,8 @@ import com.foodiehub.auth_service.dto.RegisterRequest;
 import com.foodiehub.auth_service.dto.UserProfileResponse;
 import com.foodiehub.auth_service.exception.InvalidCredentialsException;
 import com.foodiehub.auth_service.exception.UserAlreadyExistsException;
+import com.foodiehub.auth_service.kafka.UserRegisteredEvent;
+import com.foodiehub.auth_service.kafka.UserRegisteredProducer;
 import com.foodiehub.auth_service.model.Role;
 import com.foodiehub.auth_service.model.User;
 import com.foodiehub.auth_service.util.JwtUtil;
@@ -29,10 +31,12 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtUtil jwtUtil;
+    private final UserRegisteredProducer userRegisteredProducer;
 
     @Transactional
     public UserProfileResponse register(RegisterRequest request, Role role) {
 
+        System.out.println("This is REgister sservice");
         if (userDao.existsByEmail(request.email())) {
             throw new UserAlreadyExistsException(
                     "Email already registered"
@@ -46,7 +50,16 @@ public class AuthService {
                 .role(role)
                 .build();
 
+        System.out.println("Before save");
         User savedUser = userDao.save(user);
+        UserRegisteredEvent event = new UserRegisteredEvent(
+                savedUser.getId(),
+                savedUser.getEmail(),
+                savedUser.getFullName(),
+                savedUser.getRole()
+        );
+
+        userRegisteredProducer.publish(event);
 
         return toProfileResponse(savedUser);
     }
