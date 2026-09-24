@@ -1,9 +1,6 @@
 package com.foodiehub.wallet_service.controller;
 
-import com.foodiehub.wallet_service.dto.AddFundsRequest;
-import com.foodiehub.wallet_service.dto.AddFundsResponse;
-import com.foodiehub.wallet_service.dto.WalletResponse;
-import com.foodiehub.wallet_service.dto.WalletTransactionResponse;
+import com.foodiehub.wallet_service.dto.*;
 import com.foodiehub.wallet_service.service.WalletService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +53,29 @@ public class WalletController {
                 walletService.getTransactions(
                         userId,
                         PageRequest.of(page, safeSize)
+                )
+        );
+    }
+    @PostMapping("/debit")
+    public ResponseEntity<DebitWalletResponse> debitWallet(
+
+            @RequestHeader("X-User-Id")
+            UUID userId,
+
+            @RequestHeader("Idempotency-Key")
+            String idempotencyKey,
+
+            @Valid
+            @RequestBody
+            DebitWalletRequest request
+    ) {
+        System.out.println("Hello from controller");
+
+        return ResponseEntity.ok(
+                walletService.debitWallet(
+                        userId,
+                        request,
+                        idempotencyKey
                 )
         );
     }

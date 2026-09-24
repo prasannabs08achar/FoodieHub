@@ -60,4 +60,32 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.BAD_REQUEST)
                 .body(errors);
     }
+
+    @ExceptionHandler(OrderNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleOrderNotFound(
+            OrderNotFoundException ex
+    ) {
+
+        Map<String, String> response = new HashMap<>();
+
+        response.put("error", ex.getMessage());
+
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(response);
+    }
+    @ExceptionHandler(InvalidOrderStateTransitionException.class)
+    public ResponseEntity<Map<String, String>>
+    handleInvalidOrderStateTransition(
+            InvalidOrderStateTransitionException ex
+    ) {
+
+        Map<String, String> response = new HashMap<>();
+
+        response.put("error", ex.getMessage());
+
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(response);
+    }
 }

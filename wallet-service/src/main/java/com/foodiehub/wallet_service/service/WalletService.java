@@ -3,10 +3,8 @@ package com.foodiehub.wallet_service.service;
 import com.foodiehub.wallet_service.dao.IdempotencyKeyDao;
 import com.foodiehub.wallet_service.dao.WalletDao;
 import com.foodiehub.wallet_service.dao.WalletTransactionDao;
-import com.foodiehub.wallet_service.dto.AddFundsRequest;
-import com.foodiehub.wallet_service.dto.AddFundsResponse;
-import com.foodiehub.wallet_service.dto.WalletResponse;
-import com.foodiehub.wallet_service.dto.WalletTransactionResponse;
+import com.foodiehub.wallet_service.dto.*;
+import com.foodiehub.wallet_service.exception.InsufficientBalanceException;
 import com.foodiehub.wallet_service.exception.WalletNotFoundException;
 import com.foodiehub.wallet_service.model.IdempotencyKey;
 import com.foodiehub.wallet_service.model.TransactionType;
@@ -25,6 +23,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class WalletService {
     private static final String ADD_FUNDS = "ADD_FUNDS";
+    private static final String ORDER_DEBIT = "ORDER_DEBIT";
 
     private final WalletDao walletRepository;
     private final WalletTransactionDao transactionRepository;
@@ -198,6 +197,121 @@ public class WalletService {
         String[] values = response.split("\\|");
 
         return new AddFundsResponse(
+                UUID.fromString(values[0]),
+                UUID.fromString(values[1]),
+                new BigDecimal(values[2]),
+                new BigDecimal(values[3])
+        );
+    }
+
+    @Transactional
+    public DebitWalletResponse debitWallet(
+            UUID userId,
+            DebitWalletRequest request,
+            String idempotencyKey
+    ) {
+        System.out.println("Hello from service");
+
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Idempotency-Key header is required"
+            );
+        }
+
+        var existingKey =
+                idempotencyKeyRepository
+                        .findByUserIdAndKeyAndOperation(
+                                userId,
+                                idempotencyKey,
+                                ORDER_DEBIT
+                        );
+
+        if (existingKey.isPresent()) {
+            return deserializeDebitWalletResponse(
+                    existingKey.get().getResponse()
+            );
+        }
+
+        Wallet wallet =
+                walletRepository
+                        .findByUserIdForUpdate(userId)
+                        .orElseThrow(() ->
+                                new WalletNotFoundException(
+                                        "Wallet not found for user: " + userId
+                                )
+                        );
+
+        BigDecimal balanceBefore = wallet.getBalance();
+
+        if (balanceBefore.compareTo(request.amount()) < 0) {
+            throw new InsufficientBalanceException(
+                    "Insufficient wallet balance"
+            );
+        }
+
+        BigDecimal balanceAfter =
+                balanceBefore.subtract(request.amount());
+
+        wallet.setBalance(balanceAfter);
+
+        walletRepository.save(wallet);
+
+        WalletTransaction transaction =
+                WalletTransaction.builder()
+                        .walletId(wallet.getId())
+                        .type(TransactionType.DEBIT)
+                        .amount(request.amount())
+                        .balanceBefore(balanceBefore)
+                        .balanceAfter(balanceAfter)
+                        .referenceType("ORDER")
+                        .referenceId(request.referenceId())
+                        .description("Wallet debited for order")
+                        .build();
+
+        WalletTransaction savedTransaction =
+                transactionRepository.save(transaction);
+
+        DebitWalletResponse response =
+                new DebitWalletResponse(
+                        savedTransaction.getId(),
+                        wallet.getId(),
+                        request.amount(),
+                        balanceAfter
+                );
+
+        IdempotencyKey key =
+                IdempotencyKey.builder()
+                        .userId(userId)
+                        .key(idempotencyKey)
+                        .operation(ORDER_DEBIT)
+                        .response(
+                                serializeDebitWalletResponse(response)
+                        )
+                        .build();
+
+        idempotencyKeyRepository.save(key);
+
+        return response;
+    }
+    private String serializeDebitWalletResponse(
+            DebitWalletResponse response
+    ) {
+
+        return response.transactionId()
+                + "|" +
+                response.walletId()
+                + "|" +
+                response.amount()
+                + "|" +
+                response.balance();
+    }
+    private DebitWalletResponse deserializeDebitWalletResponse(
+            String response
+    ) {
+
+        String[] values = response.split("\\|");
+
+        return new DebitWalletResponse(
                 UUID.fromString(values[0]),
                 UUID.fromString(values[1]),
                 new BigDecimal(values[2]),
