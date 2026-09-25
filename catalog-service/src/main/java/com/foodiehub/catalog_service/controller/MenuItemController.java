@@ -1,7 +1,9 @@
 package com.foodiehub.catalog_service.controller;
 
+import com.foodiehub.catalog_service.dto.DecrementStockRequest;
 import com.foodiehub.catalog_service.dto.MenuItemRequest;
 import com.foodiehub.catalog_service.dto.MenuItemResponse;
+import com.foodiehub.catalog_service.dto.StockOperationResponse;
 import com.foodiehub.catalog_service.model.IdempotencyRecord;
 import com.foodiehub.catalog_service.service.IdempotencyService;
 import com.foodiehub.catalog_service.service.MenuItemService;
@@ -161,6 +163,26 @@ public class MenuItemController {
         );
 
         return ResponseEntity.noContent().build();
+    }
+    @PostMapping("/menu-items/{menuItemId}/stock/decrement")
+    public ResponseEntity<StockOperationResponse> decrementStock(
+
+            @PathVariable
+            UUID menuItemId,
+
+
+            @Valid
+            @RequestBody
+            DecrementStockRequest request
+    ) {
+        System.out.println(menuItemId);
+
+        return ResponseEntity.ok(
+                menuItemService.decrementStock(
+                        menuItemId,
+                        request.quantity()
+                )
+        );
     }
 
     /*

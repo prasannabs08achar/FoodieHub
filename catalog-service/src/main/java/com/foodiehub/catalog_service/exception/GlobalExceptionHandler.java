@@ -134,4 +134,12 @@ public class GlobalExceptionHandler {
                         "message", "A menu item with this name already exists for this restaurant"
                 ));
     }
+    @ExceptionHandler(InsufficientStockException.class)
+    public ResponseEntity<String> handleInsufficientStock(
+            InsufficientStockException ex
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ex.getMessage());
+    }
 }
