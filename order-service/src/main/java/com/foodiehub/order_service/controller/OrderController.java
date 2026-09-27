@@ -2,6 +2,7 @@ package com.foodiehub.order_service.controller;
 
 import com.foodiehub.order_service.dto.OrderResponse;
 import com.foodiehub.order_service.dto.OrderStateHistoryResponse;
+import com.foodiehub.order_service.dto.PlaceOrderRequest;
 import com.foodiehub.order_service.dto.UpdateOrderStatusRequest;
 import com.foodiehub.order_service.model.OrderStatus;
 import com.foodiehub.order_service.service.OrderService;
@@ -78,6 +79,28 @@ public class OrderController {
 
         return ResponseEntity.ok(
                 orderService.getStateHistory(orderId)
+        );
+    }
+    @PostMapping
+    public ResponseEntity<OrderResponse> placeOrder(
+
+            @RequestHeader("X-User-Id")
+            UUID customerId,
+
+            @RequestHeader("Idempotency-Key")
+            String idempotencyKey,
+
+            @Valid
+            @RequestBody
+            PlaceOrderRequest request
+    ) {
+
+        return ResponseEntity.ok(
+                orderService.placeOrder(
+                        customerId,
+                        request,
+                        idempotencyKey
+                )
         );
     }
 }
