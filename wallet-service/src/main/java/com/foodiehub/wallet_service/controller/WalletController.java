@@ -79,4 +79,26 @@ public class WalletController {
                 )
         );
     }
+    @PostMapping("/refund")
+    public ResponseEntity<RefundWalletResponse> refundWallet(
+
+            @RequestHeader("X-User-Id")
+            UUID userId,
+
+            @RequestHeader("Idempotency-Key")
+            String idempotencyKey,
+
+            @Valid
+            @RequestBody
+            RefundWalletRequest request
+    ) {
+
+        return ResponseEntity.ok(
+                walletService.refundWallet(
+                        userId,
+                        request,
+                        idempotencyKey
+                )
+        );
+    }
 }

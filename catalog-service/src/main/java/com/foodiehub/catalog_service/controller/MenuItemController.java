@@ -1,9 +1,6 @@
 package com.foodiehub.catalog_service.controller;
 
-import com.foodiehub.catalog_service.dto.DecrementStockRequest;
-import com.foodiehub.catalog_service.dto.MenuItemRequest;
-import com.foodiehub.catalog_service.dto.MenuItemResponse;
-import com.foodiehub.catalog_service.dto.StockOperationResponse;
+import com.foodiehub.catalog_service.dto.*;
 import com.foodiehub.catalog_service.model.IdempotencyRecord;
 import com.foodiehub.catalog_service.service.IdempotencyService;
 import com.foodiehub.catalog_service.service.MenuItemService;
@@ -170,19 +167,85 @@ public class MenuItemController {
             @PathVariable
             UUID menuItemId,
 
+            @RequestHeader("Idempotency-Key")
+            String idempotencyKey,
 
             @Valid
             @RequestBody
             DecrementStockRequest request
     ) {
-        System.out.println(menuItemId);
 
         return ResponseEntity.ok(
                 menuItemService.decrementStock(
                         menuItemId,
-                        request.quantity()
+                        request.quantity(),
+                        idempotencyKey
                 )
         );
+    }
+    @PostMapping("/menu-items/{menuItemId}/stock/restore")
+    public ResponseEntity<?> restoreStock(
+
+            @PathVariable
+            UUID menuItemId,
+
+            @RequestHeader("Idempotency-Key")
+            String idempotencyKey,
+
+            @Valid
+            @RequestBody
+            RestoreStockRequest request
+    ) {
+
+        idempotencyService.validateKey(idempotencyKey);
+
+        String operation = "RESTORE_STOCK";
+
+        String requestHash =
+                idempotencyService.generateRequestHash(
+                        menuItemId,
+                        request
+                );
+
+        var existingRecord =
+                idempotencyService.findByKey(
+                        idempotencyKey
+                );
+
+        if (existingRecord.isPresent()) {
+
+            IdempotencyRecord record =
+                    existingRecord.get();
+
+            idempotencyService.validateExistingRecord(
+                    record,
+                    operation,
+                    requestHash
+            );
+
+            return ResponseEntity
+                    .status(record.getResponseStatus())
+                    .body(
+                            idempotencyService
+                                    .getStoredResponse(record)
+                    );
+        }
+
+        StockOperationResponse response =
+                menuItemService.restoreStock(
+                        menuItemId,
+                        request.quantity()
+                );
+
+        idempotencyService.saveResponse(
+                idempotencyKey,
+                operation,
+                requestHash,
+                200,
+                response
+        );
+
+        return ResponseEntity.ok(response);
     }
 
     /*

@@ -24,6 +24,7 @@ import java.util.UUID;
 public class WalletService {
     private static final String ADD_FUNDS = "ADD_FUNDS";
     private static final String ORDER_DEBIT = "ORDER_DEBIT";
+    private static final String ORDER_REFUND = "ORDER_REFUND";
 
     private final WalletDao walletRepository;
     private final WalletTransactionDao transactionRepository;
@@ -312,6 +313,115 @@ public class WalletService {
         String[] values = response.split("\\|");
 
         return new DebitWalletResponse(
+                UUID.fromString(values[0]),
+                UUID.fromString(values[1]),
+                new BigDecimal(values[2]),
+                new BigDecimal(values[3])
+        );
+    }
+    @Transactional
+    public RefundWalletResponse refundWallet(
+            UUID userId,
+            RefundWalletRequest request,
+            String idempotencyKey
+    ) {
+
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Idempotency-Key header is required"
+            );
+        }
+
+        var existingKey =
+                idempotencyKeyRepository
+                        .findByUserIdAndKeyAndOperation(
+                                userId,
+                                idempotencyKey,
+                                ORDER_REFUND
+                        );
+
+        if (existingKey.isPresent()) {
+
+            return deserializeRefundWalletResponse(
+                    existingKey.get().getResponse()
+            );
+        }
+
+        Wallet wallet =
+                walletRepository
+                        .findByUserIdForUpdate(userId)
+                        .orElseThrow(() ->
+                                new WalletNotFoundException(
+                                        "Wallet not found for user: " + userId
+                                )
+                        );
+
+        BigDecimal balanceBefore =
+                wallet.getBalance();
+
+        BigDecimal balanceAfter =
+                balanceBefore.add(request.amount());
+
+        wallet.setBalance(balanceAfter);
+
+        walletRepository.save(wallet);
+
+        WalletTransaction transaction =
+                WalletTransaction.builder()
+                        .walletId(wallet.getId())
+                        .type(TransactionType.CREDIT)
+                        .amount(request.amount())
+                        .balanceBefore(balanceBefore)
+                        .balanceAfter(balanceAfter)
+                        .referenceType("ORDER_REFUND")
+                        .referenceId(request.referenceId())
+                        .description("Wallet refunded for cancelled order placement")
+                        .build();
+
+        WalletTransaction savedTransaction =
+                transactionRepository.save(transaction);
+
+        RefundWalletResponse response =
+                new RefundWalletResponse(
+                        savedTransaction.getId(),
+                        wallet.getId(),
+                        request.amount(),
+                        balanceAfter
+                );
+
+        IdempotencyKey key =
+                IdempotencyKey.builder()
+                        .userId(userId)
+                        .key(idempotencyKey)
+                        .operation(ORDER_REFUND)
+                        .response(
+                                serializeRefundWalletResponse(response)
+                        )
+                        .build();
+
+        idempotencyKeyRepository.save(key);
+
+        return response;
+    }
+    private String serializeRefundWalletResponse(
+            RefundWalletResponse response
+    ) {
+
+        return response.transactionId()
+                + "|" +
+                response.walletId()
+                + "|" +
+                response.amount()
+                + "|" +
+                response.balance();
+    }
+    private RefundWalletResponse deserializeRefundWalletResponse(
+            String response
+    ) {
+
+        String[] values = response.split("\\|");
+
+        return new RefundWalletResponse(
                 UUID.fromString(values[0]),
                 UUID.fromString(values[1]),
                 new BigDecimal(values[2]),

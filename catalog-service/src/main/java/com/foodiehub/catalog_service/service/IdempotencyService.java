@@ -194,7 +194,69 @@ public class IdempotencyService {
             );
         }
     }
+    public String generateRequestHash(
+            Object request
+    ) {
 
+        try {
+
+            String requestJson =
+                    objectMapper.writeValueAsString(
+                            request
+                    );
+
+            MessageDigest digest =
+                    MessageDigest.getInstance("SHA-256");
+
+            byte[] hash =
+                    digest.digest(
+                            requestJson.getBytes(
+                                    StandardCharsets.UTF_8
+                            )
+                    );
+
+            StringBuilder result =
+                    new StringBuilder();
+
+            for (byte b : hash) {
+
+                result.append(
+                        String.format("%02x", b)
+                );
+            }
+
+            return result.toString();
+
+        } catch (NoSuchAlgorithmException |
+                 JsonProcessingException e) {
+
+            throw new RuntimeException(
+                    "Unable to generate request hash",
+                    e
+            );
+        }
+    }
+
+    public <T> T getStoredResponse(
+            IdempotencyRecord record,
+            Class<T> responseType
+    ) {
+
+        try {
+
+            return objectMapper.readValue(
+                    record.getResponseBody(),
+                    responseType
+            );
+
+        } catch (JsonProcessingException e) {
+
+            throw new RuntimeException(
+                    "Unable to read stored idempotency response",
+                    e
+            );
+        }
+    }
     private record RequestHashData(
             UUID userId,
             Object request
