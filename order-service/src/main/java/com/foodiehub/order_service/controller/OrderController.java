@@ -1,9 +1,6 @@
 package com.foodiehub.order_service.controller;
 
-import com.foodiehub.order_service.dto.OrderResponse;
-import com.foodiehub.order_service.dto.OrderStateHistoryResponse;
-import com.foodiehub.order_service.dto.PlaceOrderRequest;
-import com.foodiehub.order_service.dto.UpdateOrderStatusRequest;
+import com.foodiehub.order_service.dto.*;
 import com.foodiehub.order_service.model.OrderStatus;
 import com.foodiehub.order_service.service.OrderService;
 import jakarta.validation.Valid;
@@ -103,4 +100,36 @@ public class OrderController {
                 )
         );
     }
+    @PostMapping("/{orderId}/cancel")
+    public ResponseEntity<OrderResponse> cancelOrder(
+            @PathVariable UUID orderId,
+            @RequestHeader("X-User-Id") UUID customerId,
+            @Valid @RequestBody CancelOrderRequest request
+    ) {
+
+        return ResponseEntity.ok(
+                orderService.cancelOrder(
+                        orderId,
+                        customerId,
+                        request.reason()
+                )
+        );
+    }
+
+    @PostMapping("/{orderId}/restaurant-cancel")
+    public ResponseEntity<OrderResponse> restaurantCancelOrder(
+            @PathVariable UUID orderId,
+            @RequestHeader("X-User-Id") UUID restaurantOwnerId,
+            @Valid @RequestBody CancelOrderRequest request
+    ) {
+
+        return ResponseEntity.ok(
+                orderService.restaurantCancelOrder(
+                        orderId,
+                        restaurantOwnerId,
+                        request.reason()
+                )
+        );
+    }
+
 }

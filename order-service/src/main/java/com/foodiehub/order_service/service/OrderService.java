@@ -26,6 +26,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class OrderService {
 
+    private final RefundTierService refundTierService;
     private static final String ORDER_PLACEMENT =
             "ORDER_PLACEMENT";
 
@@ -811,5 +812,285 @@ public class OrderService {
                 history.getChangedAt(),
                 history.getReason()
         );
+    }
+    @Transactional
+    public OrderResponse cancelOrder(
+            UUID orderId,
+            UUID customerId,
+            String reason
+    ) {
+
+        Order order = getOrderEntity(orderId);
+
+        // 1. Customer can cancel only their own order
+        if (!order.getCustomerId().equals(customerId)) {
+            throw new IllegalArgumentException(
+                    "Customer is not allowed to cancel this order"
+            );
+        }
+
+        OrderStatus currentStatus = order.getStatus();
+
+        // 2. Delivered and already cancelled are terminal
+        if (currentStatus == OrderStatus.DELIVERED ||
+                currentStatus == OrderStatus.CANCELLED) {
+
+            throw new IllegalArgumentException(
+                    "Order cannot be cancelled in status: "
+                            + currentStatus
+            );
+        }
+
+        // 3. Get configured refund tier
+        RefundTier refundTier =
+                refundTierService.getRefundTier(
+                        RefundActor.CUSTOMER,
+                        currentStatus
+                );
+
+        // 4. Calculate refund
+        BigDecimal refundAmount =
+                order.getTotalAmount()
+                        .multiply(
+                                refundTier.getRefundPercentage()
+                                        .divide(
+                                                BigDecimal.valueOf(100)
+                                        )
+                        );
+
+        // 5. Refund wallet if refund > 0
+        if (refundAmount.compareTo(BigDecimal.ZERO) > 0) {
+
+            walletClient.refundWallet(
+                    customerId,
+
+                    WALLET_REFUND_PREFIX
+                            + "CANCEL-"
+                            + orderId,
+
+                    new RefundWalletRequest(
+                            refundAmount,
+                            orderId.toString()
+                    )
+            );
+        }
+
+        // 6. Restore stock
+        restoreOrderStock(order, orderId);
+
+        // 7. Change order state
+        order.setStatus(OrderStatus.CANCELLED);
+
+        orderDao.save(order);
+
+        // 8. Save state history
+        OrderStateHistory history =
+                OrderStateHistory.builder()
+                        .orderId(order.getId())
+                        .fromStatus(currentStatus)
+                        .toStatus(OrderStatus.CANCELLED)
+                        .changedBy(customerId)
+                        .reason(reason)
+                        .build();
+
+        orderStateHistoryDao.save(history);
+
+        return mapToResponse(order);
+    }
+    private void restoreOrderStock(
+            Order order,
+            UUID orderId
+    ) {
+
+        List<OrderItem> orderItems =
+                orderItemDao.findByOrderId(order.getId());
+
+        for (OrderItem orderItem : orderItems) {
+
+            catalogClient.restoreStock(
+                    orderItem.getMenuItemId(),
+
+                    STOCK_RESTORE_PREFIX
+                            + "CANCEL-"
+                            + orderId
+                            + "-"
+                            + orderItem.getMenuItemId(),
+
+                    new RestoreStockRequest(
+                            orderItem.getQuantity()
+                    )
+            );
+        }
+    }
+    @Transactional
+    public OrderResponse restaurantCancelOrder(
+            UUID orderId,
+            UUID restaurantOwnerId,
+            String reason
+    ) {
+
+        Order order = getOrderEntity(orderId);
+
+        // 1. Get restaurant details from Catalog Service
+        CatalogRestaurantResponse restaurant =
+                catalogClient.getRestaurant(
+                        order.getRestaurantId()
+                );
+
+        // 2. Verify that the caller owns this restaurant
+        if (!restaurant.ownerId().equals(restaurantOwnerId)) {
+            throw new IllegalArgumentException(
+                    "Restaurant owner is not allowed to cancel this order"
+            );
+        }
+
+        OrderStatus currentStatus = order.getStatus();
+
+        // 3. Restaurant can cancel only in these states
+        if (currentStatus != OrderStatus.PLACED &&
+                currentStatus != OrderStatus.ACCEPTED &&
+                currentStatus != OrderStatus.PREPARING) {
+
+            throw new IllegalArgumentException(
+                    "Restaurant cannot cancel order in status: "
+                            + currentStatus
+            );
+        }
+
+        // 4. Reason is mandatory for restaurant cancellation
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Cancellation reason is required"
+            );
+        }
+
+        // 5. Get configured restaurant refund tier
+        RefundTier refundTier =
+                refundTierService.getRefundTier(
+                        RefundActor.RESTAURANT,
+                        currentStatus
+                );
+
+        // 6. Calculate refund
+        BigDecimal refundAmount =
+                order.getTotalAmount()
+                        .multiply(
+                                refundTier.getRefundPercentage()
+                                        .divide(BigDecimal.valueOf(100))
+                        );
+
+        // 7. Refund customer wallet
+        if (refundAmount.compareTo(BigDecimal.ZERO) > 0) {
+
+            walletClient.refundWallet(
+                    order.getCustomerId(),
+
+                    WALLET_REFUND_PREFIX
+                            + "RESTAURANT-CANCEL-"
+                            + orderId,
+
+                    new RefundWalletRequest(
+                            refundAmount,
+                            orderId.toString()
+                    )
+            );
+        }
+
+        // 8. Restore stock
+        restoreOrderStock(order, orderId);
+
+        // 9. Change order status
+        order.setStatus(OrderStatus.CANCELLED);
+
+        orderDao.save(order);
+
+        // 10. Save state history
+        OrderStateHistory history =
+                OrderStateHistory.builder()
+                        .orderId(order.getId())
+                        .fromStatus(currentStatus)
+                        .toStatus(OrderStatus.CANCELLED)
+                        .changedBy(restaurantOwnerId)
+                        .reason(reason)
+                        .build();
+
+        orderStateHistoryDao.save(history);
+
+        return mapToResponse(order);
+    }
+
+    @Transactional
+    public OrderResponse systemCancelOrder(
+            UUID orderId,
+            String reason
+    ) {
+
+        Order order = getOrderEntity(orderId);
+
+        OrderStatus currentStatus = order.getStatus();
+
+        // 1. System cancellation is not allowed for terminal states
+        if (currentStatus == OrderStatus.DELIVERED ||
+                currentStatus == OrderStatus.CANCELLED) {
+
+            throw new IllegalArgumentException(
+                    "Order cannot be cancelled in status: "
+                            + currentStatus
+            );
+        }
+
+        // 2. Get the configured SYSTEM refund tier
+        RefundTier refundTier =
+                refundTierService.getRefundTier(
+                        RefundActor.SYSTEM,
+                        currentStatus
+                );
+
+        // 3. Calculate refund
+        BigDecimal refundAmount =
+                order.getTotalAmount()
+                        .multiply(
+                                refundTier.getRefundPercentage()
+                                        .divide(BigDecimal.valueOf(100))
+                        );
+
+        // 4. Refund the customer
+        if (refundAmount.compareTo(BigDecimal.ZERO) > 0) {
+
+            walletClient.refundWallet(
+                    order.getCustomerId(),
+
+                    WALLET_REFUND_PREFIX
+                            + "SYSTEM-CANCEL-"
+                            + orderId,
+
+                    new RefundWalletRequest(
+                            refundAmount,
+                            orderId.toString()
+                    )
+            );
+        }
+
+        // 5. Restore stock
+        restoreOrderStock(order, orderId);
+
+        // 6. Change order status
+        order.setStatus(OrderStatus.CANCELLED);
+
+        orderDao.save(order);
+
+        // 7. Save state history
+        OrderStateHistory history =
+                OrderStateHistory.builder()
+                        .orderId(order.getId())
+                        .fromStatus(currentStatus)
+                        .toStatus(OrderStatus.CANCELLED)
+                        .changedBy(null)
+                        .reason(reason)
+                        .build();
+
+        orderStateHistoryDao.save(history);
+
+        return mapToResponse(order);
     }
 }
