@@ -184,7 +184,7 @@ public class MenuItemController {
         );
     }
     @PostMapping("/menu-items/{menuItemId}/stock/restore")
-    public ResponseEntity<?> restoreStock(
+    public ResponseEntity<StockOperationResponse> restoreStock(
 
             @PathVariable
             UUID menuItemId,
@@ -197,55 +197,13 @@ public class MenuItemController {
             RestoreStockRequest request
     ) {
 
-        idempotencyService.validateKey(idempotencyKey);
-
-        String operation = "RESTORE_STOCK";
-
-        String requestHash =
-                idempotencyService.generateRequestHash(
-                        menuItemId,
-                        request
-                );
-
-        var existingRecord =
-                idempotencyService.findByKey(
-                        idempotencyKey
-                );
-
-        if (existingRecord.isPresent()) {
-
-            IdempotencyRecord record =
-                    existingRecord.get();
-
-            idempotencyService.validateExistingRecord(
-                    record,
-                    operation,
-                    requestHash
-            );
-
-            return ResponseEntity
-                    .status(record.getResponseStatus())
-                    .body(
-                            idempotencyService
-                                    .getStoredResponse(record)
-                    );
-        }
-
-        StockOperationResponse response =
+        return ResponseEntity.ok(
                 menuItemService.restoreStock(
                         menuItemId,
-                        request.quantity()
-                );
-
-        idempotencyService.saveResponse(
-                idempotencyKey,
-                operation,
-                requestHash,
-                200,
-                response
+                        request.quantity(),
+                        idempotencyKey
+                )
         );
-
-        return ResponseEntity.ok(response);
     }
 
     /*

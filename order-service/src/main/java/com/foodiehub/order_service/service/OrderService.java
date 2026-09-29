@@ -1096,11 +1096,9 @@ public class OrderService {
         /*
          * 6. Restore stock.
          */
-        restoreOrderStock(
-                order,
-                orderId
-        );
-
+        if (shouldRestoreStock(currentStatus)) {
+            restoreOrderStock(order, orderId);
+        }
 
         /*
          * 7. Change order state.
@@ -1312,10 +1310,9 @@ public class OrderService {
         /*
          * 8. Restore stock.
          */
-        restoreOrderStock(
-                order,
-                orderId
-        );
+        if (shouldRestoreStock(currentStatus)) {
+            restoreOrderStock(order, orderId);
+        }
 
 
         /*
@@ -1455,11 +1452,9 @@ public class OrderService {
         /*
          * Restore stock.
          */
-        restoreOrderStock(
-                order,
-                orderId
-        );
-
+        if (shouldRestoreStock(currentStatus)) {
+            restoreOrderStock(order, orderId);
+        }
 
         /*
          * Change order status.
@@ -1643,5 +1638,9 @@ public class OrderService {
          */
         return preparingOrders
                 < maxConcurrentOrders;
+    }
+    private boolean shouldRestoreStock(OrderStatus status) {
+        return status == OrderStatus.PLACED
+                || status == OrderStatus.ACCEPTED;
     }
 }
