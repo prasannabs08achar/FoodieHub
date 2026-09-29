@@ -3,6 +3,7 @@ package com.foodiehub.order_service.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.foodiehub.order_service.client.CatalogClient;
+import com.foodiehub.order_service.client.DispatchClient;
 import com.foodiehub.order_service.client.WalletClient;
 import com.foodiehub.order_service.dao.*;
 import com.foodiehub.order_service.dto.*;
@@ -26,7 +27,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class OrderService {
 
-    private final RefundTierService refundTierService;
     private static final String ORDER_PLACEMENT =
             "ORDER_PLACEMENT";
 
@@ -53,8 +53,13 @@ public class OrderService {
 
     private final CatalogClient catalogClient;
     private final WalletClient walletClient;
+    private final DispatchClient dispatchClient;
 
+    private final RefundTierService refundTierService;
     private final OrderStateTransitionValidator transitionValidator;
+
+    private final KitchenCapacityService kitchenCapacityService;
+    private final KitchenQueueService kitchenQueueService;
 
     private final ObjectMapper objectMapper;
 
@@ -90,10 +95,17 @@ public class OrderService {
 
         if (existingRecord.isPresent()) {
 
-            OrderIdempotencyRecord record = getOrderIdempotencyRecord(customerId, existingRecord, requestHash);
+            OrderIdempotencyRecord record =
+                    getOrderIdempotencyRecord(
+                            customerId,
+                            existingRecord,
+                            requestHash
+                    );
 
             return mapToResponse(
-                    getOrderEntity(record.getOrderId())
+                    getOrderEntity(
+                            record.getOrderId()
+                    )
             );
         }
 
@@ -117,7 +129,9 @@ public class OrderService {
                         );
 
         List<CartItem> cartItems =
-                cartItemDao.findByCartId(cart.getId());
+                cartItemDao.findByCartId(
+                        cart.getId()
+                );
 
         if (cartItems.isEmpty()) {
 
@@ -138,7 +152,9 @@ public class OrderService {
                         request.restaurantId()
                 );
 
-        if (!Boolean.TRUE.equals(restaurant.open())) {
+        if (!Boolean.TRUE.equals(
+                restaurant.open()
+        )) {
 
             throw new IllegalArgumentException(
                     "Restaurant is currently closed"
@@ -193,7 +209,9 @@ public class OrderService {
             /*
              * Item must be active.
              */
-            if (!Boolean.TRUE.equals(menuItem.active())) {
+            if (!Boolean.TRUE.equals(
+                    menuItem.active()
+            )) {
 
                 throw new IllegalArgumentException(
                         "Menu item is inactive: "
@@ -202,17 +220,19 @@ public class OrderService {
             }
 
             /*
-             * The actual stock + time-window check will be
-             * performed atomically by Catalog during
-             * stock decrement in Step 10.7.
+             * Actual stock and time-window validation
+             * happens atomically inside Catalog Service
+             * during stock decrement.
              *
-             * Here we revalidate the current price.
+             * Revalidate the current server-side price.
              */
             cartItem.setUnitPrice(
                     menuItem.price()
             );
 
-            cartItemDao.save(cartItem);
+            cartItemDao.save(
+                    cartItem
+            );
 
             BigDecimal lineTotal =
                     menuItem.price()
@@ -223,9 +243,13 @@ public class OrderService {
                             );
 
             totalAmount =
-                    totalAmount.add(lineTotal);
+                    totalAmount.add(
+                            lineTotal
+                    );
 
-            catalogItems.add(menuItem);
+            catalogItems.add(
+                    menuItem
+            );
         }
 
 
@@ -248,7 +272,8 @@ public class OrderService {
             debitResponse =
                     walletClient.debitWallet(
                             customerId,
-                            WALLET_DEBIT_PREFIX + idempotencyKey,
+                            WALLET_DEBIT_PREFIX
+                                    + idempotencyKey,
                             debitRequest
                     );
 
@@ -260,7 +285,9 @@ public class OrderService {
 
         /*
          * Keep track of successful stock operations.
-         * If something fails later, we restore them.
+         *
+         * If something fails after a stock decrement,
+         * the successful decrements will be restored.
          */
         List<CatalogMenuItemResponse> decrementedItems =
                 new ArrayList<>();
@@ -299,14 +326,18 @@ public class OrderService {
 
                 catalogClient.decrementStock(
                         menuItem.id(),
+
                         STOCK_DECREMENT_PREFIX
                                 + idempotencyKey
                                 + "-"
                                 + menuItem.id(),
+
                         stockRequest
                 );
 
-                decrementedItems.add(menuItem);
+                decrementedItems.add(
+                        menuItem
+                );
             }
 
 
@@ -318,7 +349,9 @@ public class OrderService {
 
             Order order =
                     Order.builder()
-                            .customerId(customerId)
+                            .customerId(
+                                    customerId
+                            )
                             .restaurantId(
                                     request.restaurantId()
                             )
@@ -328,12 +361,18 @@ public class OrderService {
                             .deliveryLongitude(
                                     request.deliveryLongitude()
                             )
-                            .totalAmount(totalAmount)
-                            .status(OrderStatus.PLACED)
+                            .totalAmount(
+                                    totalAmount
+                            )
+                            .status(
+                                    OrderStatus.PLACED
+                            )
                             .build();
 
             order =
-                    orderDao.save(order);
+                    orderDao.save(
+                            order
+                    );
 
 
             /*
@@ -352,7 +391,9 @@ public class OrderService {
 
                 OrderItem orderItem =
                         OrderItem.builder()
-                                .orderId(order.getId())
+                                .orderId(
+                                        order.getId()
+                                )
                                 .menuItemId(
                                         cartItem.getMenuItemId()
                                 )
@@ -362,10 +403,14 @@ public class OrderService {
                                 .unitPrice(
                                         cartItem.getUnitPrice()
                                 )
-                                .totalPrice(lineTotal)
+                                .totalPrice(
+                                        lineTotal
+                                )
                                 .build();
 
-                orderItemDao.save(orderItem);
+                orderItemDao.save(
+                        orderItem
+                );
             }
 
 
@@ -374,14 +419,26 @@ public class OrderService {
              */
             OrderStateHistory history =
                     OrderStateHistory.builder()
-                            .orderId(order.getId())
-                            .fromStatus(null)
-                            .toStatus(OrderStatus.PLACED)
-                            .changedBy(customerId)
-                            .reason("Order placed")
+                            .orderId(
+                                    order.getId()
+                            )
+                            .fromStatus(
+                                    null
+                            )
+                            .toStatus(
+                                    OrderStatus.PLACED
+                            )
+                            .changedBy(
+                                    customerId
+                            )
+                            .reason(
+                                    "Order placed"
+                            )
                             .build();
 
-            orderStateHistoryDao.save(history);
+            orderStateHistoryDao.save(
+                    history
+            );
 
 
             /*
@@ -397,16 +454,24 @@ public class OrderService {
 
             /*
              * -------------------------------------------------
-             * Save Order Idempotency Record
+             * SAVE ORDER IDEMPOTENCY RECORD
              * -------------------------------------------------
              */
 
             OrderIdempotencyRecord idempotencyRecord =
                     OrderIdempotencyRecord.builder()
-                            .idempotencyKey(idempotencyKey)
-                            .customerId(customerId)
-                            .requestHash(requestHash)
-                            .orderId(order.getId())
+                            .idempotencyKey(
+                                    idempotencyKey
+                            )
+                            .customerId(
+                                    customerId
+                            )
+                            .requestHash(
+                                    requestHash
+                            )
+                            .orderId(
+                                    order.getId()
+                            )
                             .build();
 
             orderIdempotencyRecordDao.save(
@@ -414,7 +479,9 @@ public class OrderService {
             );
 
 
-            return mapToResponse(order);
+            return mapToResponse(
+                    order
+            );
 
         } catch (RuntimeException placementException) {
 
@@ -423,7 +490,7 @@ public class OrderService {
              * 10.10 - COMPENSATION
              * -------------------------------------------------
              *
-             * At this point wallet debit already succeeded.
+             * Wallet debit already succeeded.
              *
              * Therefore:
              *
@@ -447,21 +514,33 @@ public class OrderService {
         }
     }
 
-    private static OrderIdempotencyRecord getOrderIdempotencyRecord(UUID customerId, Optional<OrderIdempotencyRecord> existingRecord, String requestHash) {
+
+    private static OrderIdempotencyRecord
+    getOrderIdempotencyRecord(
+            UUID customerId,
+            Optional<OrderIdempotencyRecord> existingRecord,
+            String requestHash
+    ) {
+
         OrderIdempotencyRecord record =
                 existingRecord.get();
 
-        if (!record.getCustomerId().equals(customerId)) {
+        if (!record.getCustomerId()
+                .equals(customerId)) {
+
             throw new IllegalArgumentException(
                     "Idempotency key belongs to another customer"
             );
         }
 
-        if (!record.getRequestHash().equals(requestHash)) {
+        if (!record.getRequestHash()
+                .equals(requestHash)) {
+
             throw new IllegalArgumentException(
                     "Idempotency key cannot be reused with a different request"
             );
         }
+
         return record;
     }
 
@@ -483,7 +562,9 @@ public class OrderService {
                     cartItems.stream()
                             .filter(item ->
                                     item.getMenuItemId()
-                                            .equals(menuItem.id())
+                                            .equals(
+                                                    menuItem.id()
+                                            )
                             )
                             .findFirst()
                             .orElse(null);
@@ -512,8 +593,8 @@ public class OrderService {
                 /*
                  * Do not hide the original placement failure.
                  *
-                 * In production this should additionally be
-                 * logged/alerted because compensation failed.
+                 * Compensation failure should be logged/alerted
+                 * in production.
                  */
             }
         }
@@ -549,8 +630,8 @@ public class OrderService {
             /*
              * Do not hide the original placement failure.
              *
-             * In production this should be logged/alerted
-             * because the wallet compensation failed.
+             * Compensation failure should be logged/alerted
+             * in production.
              */
         }
     }
@@ -564,8 +645,8 @@ public class OrderService {
             String idempotencyKey
     ) {
 
-        if (idempotencyKey == null ||
-                idempotencyKey.isBlank()) {
+        if (idempotencyKey == null
+                || idempotencyKey.isBlank()) {
 
             throw new IllegalArgumentException(
                     "Idempotency-Key header is required"
@@ -597,7 +678,9 @@ public class OrderService {
                     );
 
             MessageDigest digest =
-                    MessageDigest.getInstance("SHA-256");
+                    MessageDigest.getInstance(
+                            "SHA-256"
+                    );
 
             byte[] hash =
                     digest.digest(
@@ -646,11 +729,18 @@ public class OrderService {
     // =========================================================
 
     @Transactional(readOnly = true)
-    public OrderResponse getOrder(UUID orderId) {
+    public OrderResponse getOrder(
+            UUID orderId
+    ) {
 
-        Order order = getOrderEntity(orderId);
+        Order order =
+                getOrderEntity(
+                        orderId
+                );
 
-        return mapToResponse(order);
+        return mapToResponse(
+                order
+        );
     }
 
 
@@ -660,7 +750,9 @@ public class OrderService {
     ) {
 
         return orderDao
-                .findByCustomerIdOrderByCreatedAtDesc(customerId)
+                .findByCustomerIdOrderByCreatedAtDesc(
+                        customerId
+                )
                 .stream()
                 .map(this::mapToResponse)
                 .toList();
@@ -684,6 +776,10 @@ public class OrderService {
     }
 
 
+    // =========================================================
+    // 11.10.4 - UPDATE ORDER STATUS + KITCHEN CAPACITY
+    // =========================================================
+
     @Transactional
     public OrderResponse updateStatus(
             UUID orderId,
@@ -691,7 +787,16 @@ public class OrderService {
             UpdateOrderStatusRequest request
     ) {
 
-        Order order = getOrderEntity(orderId);
+        /*
+         * Lock the order itself.
+         *
+         * This prevents two concurrent requests from
+         * changing the same order simultaneously.
+         */
+        Order order =
+                getOrderEntityForUpdate(
+                        orderId
+                );
 
         OrderStatus currentStatus =
                 order.getStatus();
@@ -699,27 +804,110 @@ public class OrderService {
         OrderStatus newStatus =
                 request.status();
 
+
+        /*
+         * Validate the state transition using the
+         * existing single source of truth.
+         */
         transitionValidator.validate(
                 currentStatus,
                 newStatus
         );
 
-        order.setStatus(newStatus);
 
-        orderDao.save(order);
+        /*
+         * =====================================================
+         * 11.10.4 - KITCHEN CAPACITY CHECK
+         * =====================================================
+         *
+         * Only ACCEPTED -> PREPARING requires kitchen capacity.
+         */
+        if (currentStatus == OrderStatus.ACCEPTED
+                && newStatus == OrderStatus.PREPARING) {
+
+            boolean capacityAvailable =
+                    hasKitchenCapacity(
+                            order.getRestaurantId()
+                    );
+
+            /*
+             * Kitchen is full.
+             *
+             * The order remains ACCEPTED.
+             *
+             * We add it to the FIFO kitchen queue.
+             */
+            if (!capacityAvailable) {
+
+                kitchenQueueService.enqueue(
+                        order.getId(),
+                        order.getRestaurantId()
+                );
+
+                /*
+                 * No state history is created because
+                 * there was no actual state transition.
+                 *
+                 * ACCEPTED -> ACCEPTED
+                 */
+                return mapToResponse(
+                        order
+                );
+            }
+        }
+
+
+        /*
+         * =====================================================
+         * NORMAL STATE TRANSITION
+         * =====================================================
+         */
+
+        order.setStatus(
+                newStatus
+        );
+
+        orderDao.save(
+                order
+        );
+
 
         OrderStateHistory history =
                 OrderStateHistory.builder()
-                        .orderId(order.getId())
-                        .fromStatus(currentStatus)
-                        .toStatus(newStatus)
-                        .changedBy(changedBy)
-                        .reason(request.reason())
+                        .orderId(
+                                order.getId()
+                        )
+                        .fromStatus(
+                                currentStatus
+                        )
+                        .toStatus(
+                                newStatus
+                        )
+                        .changedBy(
+                                changedBy
+                        )
+                        .reason(
+                                request.reason()
+                        )
                         .build();
 
-        orderStateHistoryDao.save(history);
+        orderStateHistoryDao.save(
+                history
+        );
 
-        return mapToResponse(order);
+
+        /*
+         * When PREPARING -> READY_FOR_PICKUP
+         * or PREPARING -> CANCELLED happens,
+         * a kitchen slot becomes available.
+         *
+         * KitchenQueuePromotionService handles
+         * the queued order automatically.
+         */
+
+        return mapToResponse(
+                order
+        );
     }
 
 
@@ -728,27 +916,23 @@ public class OrderService {
             UUID orderId
     ) {
 
-        getOrderEntity(orderId);
+        getOrderEntity(
+                orderId
+        );
 
         return orderStateHistoryDao
-                .findByOrderIdOrderByChangedAtAsc(orderId)
+                .findByOrderIdOrderByChangedAtAsc(
+                        orderId
+                )
                 .stream()
                 .map(this::mapHistoryToResponse)
                 .toList();
     }
 
 
-    private Order getOrderEntity(UUID orderId) {
-
-        return orderDao
-                .findById(orderId)
-                .orElseThrow(() ->
-                        new OrderNotFoundException(
-                                "Order not found: " + orderId
-                        )
-                );
-    }
-
+    // =========================================================
+    // RESPONSE MAPPING
+    // =========================================================
 
     private OrderResponse mapToResponse(
             Order order
@@ -756,7 +940,9 @@ public class OrderService {
 
         List<OrderItemResponse> items =
                 orderItemDao
-                        .findByOrderId(order.getId())
+                        .findByOrderId(
+                                order.getId()
+                        )
                         .stream()
                         .map(this::mapItemToResponse)
                         .toList();
@@ -813,6 +999,12 @@ public class OrderService {
                 history.getReason()
         );
     }
+
+
+    // =========================================================
+    // CUSTOMER CANCELLATION
+    // =========================================================
+
     @Transactional
     public OrderResponse cancelOrder(
             UUID orderId,
@@ -820,20 +1012,31 @@ public class OrderService {
             String reason
     ) {
 
-        Order order = getOrderEntity(orderId);
+        Order order =
+                getOrderEntity(
+                        orderId
+                );
 
-        // 1. Customer can cancel only their own order
-        if (!order.getCustomerId().equals(customerId)) {
+        /*
+         * 1. Customer can cancel only their own order.
+         */
+        if (!order.getCustomerId()
+                .equals(customerId)) {
+
             throw new IllegalArgumentException(
                     "Customer is not allowed to cancel this order"
             );
         }
 
-        OrderStatus currentStatus = order.getStatus();
+        OrderStatus currentStatus =
+                order.getStatus();
 
-        // 2. Delivered and already cancelled are terminal
-        if (currentStatus == OrderStatus.DELIVERED ||
-                currentStatus == OrderStatus.CANCELLED) {
+
+        /*
+         * 2. Delivered and already cancelled are terminal.
+         */
+        if (currentStatus == OrderStatus.DELIVERED
+                || currentStatus == OrderStatus.CANCELLED) {
 
             throw new IllegalArgumentException(
                     "Order cannot be cancelled in status: "
@@ -841,25 +1044,39 @@ public class OrderService {
             );
         }
 
-        // 3. Get configured refund tier
+
+        /*
+         * 3. Get configured refund tier.
+         */
         RefundTier refundTier =
                 refundTierService.getRefundTier(
                         RefundActor.CUSTOMER,
                         currentStatus
                 );
 
-        // 4. Calculate refund
+
+        /*
+         * 4. Calculate refund.
+         */
         BigDecimal refundAmount =
                 order.getTotalAmount()
                         .multiply(
-                                refundTier.getRefundPercentage()
+                                refundTier
+                                        .getRefundPercentage()
                                         .divide(
-                                                BigDecimal.valueOf(100)
+                                                BigDecimal.valueOf(
+                                                        100
+                                                )
                                         )
                         );
 
-        // 5. Refund wallet if refund > 0
-        if (refundAmount.compareTo(BigDecimal.ZERO) > 0) {
+
+        /*
+         * 5. Refund wallet if refund > 0.
+         */
+        if (refundAmount.compareTo(
+                BigDecimal.ZERO
+        ) > 0) {
 
             walletClient.refundWallet(
                     customerId,
@@ -875,37 +1092,85 @@ public class OrderService {
             );
         }
 
-        // 6. Restore stock
-        restoreOrderStock(order, orderId);
 
-        // 7. Change order state
-        order.setStatus(OrderStatus.CANCELLED);
+        /*
+         * 6. Restore stock.
+         */
+        restoreOrderStock(
+                order,
+                orderId
+        );
 
-        orderDao.save(order);
 
-        // 8. Save state history
+        /*
+         * 7. Change order state.
+         */
+        order.setStatus(
+                OrderStatus.CANCELLED
+        );
+
+        orderDao.save(
+                order
+        );
+
+
+        /*
+         * 8. Save state history.
+         */
         OrderStateHistory history =
                 OrderStateHistory.builder()
-                        .orderId(order.getId())
-                        .fromStatus(currentStatus)
-                        .toStatus(OrderStatus.CANCELLED)
-                        .changedBy(customerId)
-                        .reason(reason)
+                        .orderId(
+                                order.getId()
+                        )
+                        .fromStatus(
+                                currentStatus
+                        )
+                        .toStatus(
+                                OrderStatus.CANCELLED
+                        )
+                        .changedBy(
+                                customerId
+                        )
+                        .reason(
+                                reason
+                        )
                         .build();
 
-        orderStateHistoryDao.save(history);
+        orderStateHistoryDao.save(
+                history
+        );
 
-        return mapToResponse(order);
+
+        /*
+         * If this order was waiting in the kitchen queue,
+         * remove it.
+         */
+        kitchenQueueService.remove(
+                orderId
+        );
+
+        return mapToResponse(
+                order
+        );
     }
+
+
+    // =========================================================
+    // RESTORE ORDER STOCK
+    // =========================================================
+
     private void restoreOrderStock(
             Order order,
             UUID orderId
     ) {
 
         List<OrderItem> orderItems =
-                orderItemDao.findByOrderId(order.getId());
+                orderItemDao.findByOrderId(
+                        order.getId()
+                );
 
-        for (OrderItem orderItem : orderItems) {
+        for (OrderItem orderItem :
+                orderItems) {
 
             catalogClient.restoreStock(
                     orderItem.getMenuItemId(),
@@ -922,6 +1187,12 @@ public class OrderService {
             );
         }
     }
+
+
+    // =========================================================
+    // RESTAURANT CANCELLATION
+    // =========================================================
+
     @Transactional
     public OrderResponse restaurantCancelOrder(
             UUID orderId,
@@ -929,27 +1200,47 @@ public class OrderService {
             String reason
     ) {
 
-        Order order = getOrderEntity(orderId);
+        Order order =
+                getOrderEntity(
+                        orderId
+                );
 
-        // 1. Get restaurant details from Catalog Service
+
+        /*
+         * 1. Get restaurant details from Catalog Service.
+         */
         CatalogRestaurantResponse restaurant =
                 catalogClient.getRestaurant(
                         order.getRestaurantId()
                 );
 
-        // 2. Verify that the caller owns this restaurant
-        if (!restaurant.ownerId().equals(restaurantOwnerId)) {
+
+        /*
+         * 2. Verify restaurant ownership.
+         */
+        if (!restaurant.ownerId()
+                .equals(restaurantOwnerId)) {
+
             throw new IllegalArgumentException(
                     "Restaurant owner is not allowed to cancel this order"
             );
         }
 
-        OrderStatus currentStatus = order.getStatus();
 
-        // 3. Restaurant can cancel only in these states
-        if (currentStatus != OrderStatus.PLACED &&
-                currentStatus != OrderStatus.ACCEPTED &&
-                currentStatus != OrderStatus.PREPARING) {
+        OrderStatus currentStatus =
+                order.getStatus();
+
+
+        /*
+         * 3. Restaurant can cancel only in:
+         *
+         * PLACED
+         * ACCEPTED
+         * PREPARING
+         */
+        if (currentStatus != OrderStatus.PLACED
+                && currentStatus != OrderStatus.ACCEPTED
+                && currentStatus != OrderStatus.PREPARING) {
 
             throw new IllegalArgumentException(
                     "Restaurant cannot cancel order in status: "
@@ -957,30 +1248,51 @@ public class OrderService {
             );
         }
 
-        // 4. Reason is mandatory for restaurant cancellation
-        if (reason == null || reason.isBlank()) {
+
+        /*
+         * 4. Reason is mandatory.
+         */
+        if (reason == null
+                || reason.isBlank()) {
+
             throw new IllegalArgumentException(
                     "Cancellation reason is required"
             );
         }
 
-        // 5. Get configured restaurant refund tier
+
+        /*
+         * 5. Get configured restaurant refund tier.
+         */
         RefundTier refundTier =
                 refundTierService.getRefundTier(
                         RefundActor.RESTAURANT,
                         currentStatus
                 );
 
-        // 6. Calculate refund
+
+        /*
+         * 6. Calculate refund.
+         */
         BigDecimal refundAmount =
                 order.getTotalAmount()
                         .multiply(
-                                refundTier.getRefundPercentage()
-                                        .divide(BigDecimal.valueOf(100))
+                                refundTier
+                                        .getRefundPercentage()
+                                        .divide(
+                                                BigDecimal.valueOf(
+                                                        100
+                                                )
+                                        )
                         );
 
-        // 7. Refund customer wallet
-        if (refundAmount.compareTo(BigDecimal.ZERO) > 0) {
+
+        /*
+         * 7. Refund customer wallet.
+         */
+        if (refundAmount.compareTo(
+                BigDecimal.ZERO
+        ) > 0) {
 
             walletClient.refundWallet(
                     order.getCustomerId(),
@@ -996,28 +1308,72 @@ public class OrderService {
             );
         }
 
-        // 8. Restore stock
-        restoreOrderStock(order, orderId);
 
-        // 9. Change order status
-        order.setStatus(OrderStatus.CANCELLED);
+        /*
+         * 8. Restore stock.
+         */
+        restoreOrderStock(
+                order,
+                orderId
+        );
 
-        orderDao.save(order);
 
-        // 10. Save state history
+        /*
+         * 9. Change order status.
+         */
+        order.setStatus(
+                OrderStatus.CANCELLED
+        );
+
+        orderDao.save(
+                order
+        );
+
+
+        /*
+         * 10. Save state history.
+         */
         OrderStateHistory history =
                 OrderStateHistory.builder()
-                        .orderId(order.getId())
-                        .fromStatus(currentStatus)
-                        .toStatus(OrderStatus.CANCELLED)
-                        .changedBy(restaurantOwnerId)
-                        .reason(reason)
+                        .orderId(
+                                order.getId()
+                        )
+                        .fromStatus(
+                                currentStatus
+                        )
+                        .toStatus(
+                                OrderStatus.CANCELLED
+                        )
+                        .changedBy(
+                                restaurantOwnerId
+                        )
+                        .reason(
+                                reason
+                        )
                         .build();
 
-        orderStateHistoryDao.save(history);
+        orderStateHistoryDao.save(
+                history
+        );
 
-        return mapToResponse(order);
+
+        /*
+         * If the order was waiting in the kitchen queue,
+         * remove it.
+         */
+        kitchenQueueService.remove(
+                orderId
+        );
+
+        return mapToResponse(
+                order
+        );
     }
+
+
+    // =========================================================
+    // SYSTEM CANCELLATION
+    // =========================================================
 
     @Transactional
     public OrderResponse systemCancelOrder(
@@ -1025,13 +1381,21 @@ public class OrderService {
             String reason
     ) {
 
-        Order order = getOrderEntity(orderId);
+        Order order =
+                getOrderEntity(
+                        orderId
+                );
 
-        OrderStatus currentStatus = order.getStatus();
+        OrderStatus currentStatus =
+                order.getStatus();
 
-        // 1. System cancellation is not allowed for terminal states
-        if (currentStatus == OrderStatus.DELIVERED ||
-                currentStatus == OrderStatus.CANCELLED) {
+
+        /*
+         * System cancellation is not allowed
+         * for terminal states.
+         */
+        if (currentStatus == OrderStatus.DELIVERED
+                || currentStatus == OrderStatus.CANCELLED) {
 
             throw new IllegalArgumentException(
                     "Order cannot be cancelled in status: "
@@ -1039,23 +1403,39 @@ public class OrderService {
             );
         }
 
-        // 2. Get the configured SYSTEM refund tier
+
+        /*
+         * Get configured SYSTEM refund tier.
+         */
         RefundTier refundTier =
                 refundTierService.getRefundTier(
                         RefundActor.SYSTEM,
                         currentStatus
                 );
 
-        // 3. Calculate refund
+
+        /*
+         * Calculate refund.
+         */
         BigDecimal refundAmount =
                 order.getTotalAmount()
                         .multiply(
-                                refundTier.getRefundPercentage()
-                                        .divide(BigDecimal.valueOf(100))
+                                refundTier
+                                        .getRefundPercentage()
+                                        .divide(
+                                                BigDecimal.valueOf(
+                                                        100
+                                                )
+                                        )
                         );
 
-        // 4. Refund the customer
-        if (refundAmount.compareTo(BigDecimal.ZERO) > 0) {
+
+        /*
+         * Refund customer.
+         */
+        if (refundAmount.compareTo(
+                BigDecimal.ZERO
+        ) > 0) {
 
             walletClient.refundWallet(
                     order.getCustomerId(),
@@ -1071,26 +1451,197 @@ public class OrderService {
             );
         }
 
-        // 5. Restore stock
-        restoreOrderStock(order, orderId);
 
-        // 6. Change order status
-        order.setStatus(OrderStatus.CANCELLED);
+        /*
+         * Restore stock.
+         */
+        restoreOrderStock(
+                order,
+                orderId
+        );
 
-        orderDao.save(order);
 
-        // 7. Save state history
+        /*
+         * Change order status.
+         */
+        order.setStatus(
+                OrderStatus.CANCELLED
+        );
+
+        orderDao.save(
+                order
+        );
+
+
+        /*
+         * Save state history.
+         */
         OrderStateHistory history =
                 OrderStateHistory.builder()
-                        .orderId(order.getId())
-                        .fromStatus(currentStatus)
-                        .toStatus(OrderStatus.CANCELLED)
-                        .changedBy(null)
-                        .reason(reason)
+                        .orderId(
+                                order.getId()
+                        )
+                        .fromStatus(
+                                currentStatus
+                        )
+                        .toStatus(
+                                OrderStatus.CANCELLED
+                        )
+                        .changedBy(
+                                null
+                        )
+                        .reason(
+                                reason
+                        )
                         .build();
 
-        orderStateHistoryDao.save(history);
+        orderStateHistoryDao.save(
+                history
+        );
 
-        return mapToResponse(order);
+
+        /*
+         * If the order was waiting in the kitchen queue,
+         * remove it.
+         */
+        kitchenQueueService.remove(
+                orderId
+        );
+
+        return mapToResponse(
+                order
+        );
+    }
+
+
+    // =========================================================
+    // ENTITY LOOKUPS
+    // =========================================================
+
+    private Order getOrderEntity(
+            UUID orderId
+    ) {
+
+        return orderDao
+                .findById(
+                        orderId
+                )
+                .orElseThrow(() ->
+                        new OrderNotFoundException(
+                                "Order not found: "
+                                        + orderId
+                        )
+                );
+    }
+
+
+    /*
+     * Used when changing order state.
+     *
+     * Pessimistic lock prevents concurrent state changes
+     * on the same order.
+     */
+    private Order getOrderEntityForUpdate(
+            UUID orderId
+    ) {
+
+        return orderDao
+                .findByIdForUpdate(
+                        orderId
+                )
+                .orElseThrow(() ->
+                        new OrderNotFoundException(
+                                "Order not found: "
+                                        + orderId
+                        )
+                );
+    }
+
+
+    // =========================================================
+    // 11.10.4 - KITCHEN CAPACITY
+    // =========================================================
+
+    private boolean hasKitchenCapacity(
+            UUID restaurantId
+    ) {
+
+        /*
+         * Make sure the KitchenCapacity synchronization
+         * record exists.
+         */
+        kitchenCapacityService.ensureExists(
+                restaurantId
+        );
+
+
+        /*
+         * Acquire the pessimistic lock on the
+         * KitchenCapacity row.
+         *
+         * updateStatus() is @Transactional, so this
+         * lock remains held until that transaction finishes.
+         */
+        kitchenCapacityService.getLocked(
+                restaurantId
+        );
+
+
+        /*
+         * Catalog Service owns restaurant configuration.
+         *
+         * Therefore maxConcurrentOrders comes from
+         * Catalog Service.
+         */
+        CatalogRestaurantResponse restaurant =
+                catalogClient.getRestaurant(
+                        restaurantId
+                );
+
+
+        Integer maxConcurrentOrders =
+                restaurant.maxConcurrentOrders();
+
+
+        /*
+         * Capacity must be a positive value.
+         */
+        if (maxConcurrentOrders == null
+                || maxConcurrentOrders < 1) {
+
+            throw new IllegalStateException(
+                    "Invalid kitchen capacity configured for restaurant: "
+                            + restaurantId
+            );
+        }
+
+
+        /*
+         * Count orders currently in PREPARING.
+         */
+        int preparingOrders =
+                orderDao
+                        .findByRestaurantIdAndStatus(
+                                restaurantId,
+                                OrderStatus.PREPARING
+                        )
+                        .size();
+
+
+        /*
+         * Example:
+         *
+         * capacity = 3
+         * preparing = 2
+         *
+         * 2 < 3 → capacity available
+         *
+         * capacity = 3
+         * preparing = 3
+         *
+         * 3 < 3 → capacity unavailable
+         */
+        return preparingOrders
+                < maxConcurrentOrders;
     }
 }
