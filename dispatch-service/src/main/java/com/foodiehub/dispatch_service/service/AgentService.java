@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -50,7 +51,16 @@ public class AgentService {
             );
         }
 
+        /*
+         * Mark the agent online and initialize the
+         * heartbeat timestamp.
+         *
+         * The first real heartbeat will immediately
+         * replace this timestamp with the actual
+         * heartbeat time and location.
+         */
         agent.setOnline(true);
+        agent.setLastHeartbeatAt(Instant.now());
 
         agent =
                 agentDao.save(
@@ -79,6 +89,7 @@ public class AgentService {
                 );
 
         agent.setOnline(false);
+        agent.setLastHeartbeatAt(null);
 
         agent =
                 agentDao.save(
@@ -181,6 +192,25 @@ public class AgentService {
                                         + agentUserId
                         )
                 );
+    }
+    @Transactional
+    public AgentStatusResponse provisionAgent(UUID userId) {
+
+        Optional<Agent> existingAgent = agentDao.findByUserId(userId);
+
+        if (existingAgent.isPresent()) {
+            return mapToResponse(existingAgent.get());
+        }
+
+        Agent agent = Agent.builder()
+                .userId(userId)
+                .online(false)
+                .active(true)
+                .build();
+
+        Agent savedAgent = agentDao.save(agent);
+
+        return mapToResponse(savedAgent);
     }
 
 

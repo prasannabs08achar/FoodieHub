@@ -1,5 +1,6 @@
 package com.foodiehub.auth_service.service;
 
+import com.foodiehub.auth_service.client.DispatchClient;
 import com.foodiehub.auth_service.dao.UserDao;
 import com.foodiehub.auth_service.dto.LoginRequest;
 import com.foodiehub.auth_service.dto.LoginResponse;
@@ -32,11 +33,13 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final JwtUtil jwtUtil;
     private final UserRegisteredProducer userRegisteredProducer;
+    private final DispatchClient dispatchClient;
 
     @Transactional
     public UserProfileResponse register(RegisterRequest request, Role role) {
 
-        System.out.println("This is REgister sservice");
+        System.out.println("This is Register sservice");
+
         if (userDao.existsByEmail(request.email())) {
             throw new UserAlreadyExistsException(
                     "Email already registered"
@@ -51,7 +54,9 @@ public class AuthService {
                 .build();
 
         System.out.println("Before save");
+
         User savedUser = userDao.save(user);
+
         UserRegisteredEvent event = new UserRegisteredEvent(
                 savedUser.getId(),
                 savedUser.getEmail(),
@@ -60,6 +65,18 @@ public class AuthService {
         );
 
         userRegisteredProducer.publish(event);
+
+        /*
+         * Delivery agents must also have an Agent record
+         * in the Dispatch Service.
+         */
+        if (role == Role.AGENT) {
+            dispatchClient.provisionAgent(
+                    new DispatchClient.AgentProvisionRequest(
+                            savedUser.getId()
+                    )
+            );
+        }
 
         return toProfileResponse(savedUser);
     }

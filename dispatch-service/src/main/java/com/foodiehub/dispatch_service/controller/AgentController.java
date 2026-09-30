@@ -1,6 +1,7 @@
 package com.foodiehub.dispatch_service.controller;
 
 import com.foodiehub.dispatch_service.dto.AgentHeartbeatRequest;
+import com.foodiehub.dispatch_service.dto.AgentProvisionRequest;
 import com.foodiehub.dispatch_service.dto.AgentStatusResponse;
 import com.foodiehub.dispatch_service.model.AgentLocationHistory;
 import com.foodiehub.dispatch_service.service.AgentService;
@@ -98,6 +99,14 @@ public class AgentController {
     ) {
         return ResponseEntity.ok(
                 agentService.getLocationHistory(agentUserId)
+        );
+    }
+    @PostMapping
+    public ResponseEntity<AgentStatusResponse> provisionAgent(
+            @Valid @RequestBody AgentProvisionRequest request
+    ) {
+        return ResponseEntity.ok(
+                agentService.provisionAgent(request.userId())
         );
     }
 }
