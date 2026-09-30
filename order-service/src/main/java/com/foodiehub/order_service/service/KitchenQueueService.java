@@ -16,8 +16,15 @@ public class KitchenQueueService {
 
     private final KitchenQueueDao kitchenQueueDao;
 
+
     /*
-     * Add an order to the kitchen queue.
+     * =========================================================
+     * ENQUEUE ORDER
+     * =========================================================
+     *
+     * Adds an ACCEPTED order to the kitchen FIFO queue.
+     *
+     * Duplicate queue entries are prevented.
      */
     @Transactional
     public void enqueue(
@@ -25,12 +32,7 @@ public class KitchenQueueService {
             UUID restaurantId
     ) {
 
-        /*
-         * Prevent duplicate queue entries.
-         */
-        if (kitchenQueueDao.existsByOrderId(
-                orderId
-        )) {
+        if (kitchenQueueDao.existsByOrderId(orderId)) {
             return;
         }
 
@@ -40,14 +42,16 @@ public class KitchenQueueService {
                         .restaurantId(restaurantId)
                         .build();
 
-        kitchenQueueDao.save(
-                queueEntry
-        );
+        kitchenQueueDao.save(queueEntry);
     }
 
+
     /*
-     * Get all queued orders for a restaurant
-     * in FIFO order.
+     * =========================================================
+     * GET QUEUED ORDERS
+     * =========================================================
+     *
+     * Returns orders for one restaurant in FIFO order.
      */
     @Transactional(readOnly = true)
     public List<KitchenQueue> getQueuedOrders(
@@ -60,8 +64,11 @@ public class KitchenQueueService {
                 );
     }
 
+
     /*
-     * Get a queue entry by order ID.
+     * =========================================================
+     * GET QUEUE ENTRY BY ORDER
+     * =========================================================
      */
     @Transactional(readOnly = true)
     public Optional<KitchenQueue> getByOrderId(
@@ -73,8 +80,11 @@ public class KitchenQueueService {
         );
     }
 
+
     /*
-     * Remove an order from the kitchen queue.
+     * =========================================================
+     * REMOVE ORDER FROM QUEUE
+     * =========================================================
      */
     @Transactional
     public void remove(
@@ -84,5 +94,20 @@ public class KitchenQueueService {
         kitchenQueueDao.deleteByOrderId(
                 orderId
         );
+    }
+
+
+    /*
+     * =========================================================
+     * FIND RESTAURANTS WITH QUEUED ORDERS
+     * =========================================================
+     *
+     * Used by the background promotion worker.
+     */
+    @Transactional(readOnly = true)
+    public List<UUID> findRestaurantsWithQueuedOrders() {
+
+        return kitchenQueueDao
+                .findDistinctRestaurantIds();
     }
 }

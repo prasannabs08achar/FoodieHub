@@ -1,10 +1,8 @@
 package com.foodiehub.order_service.service;
 
 import com.foodiehub.order_service.client.CatalogClient;
-import com.foodiehub.order_service.dao.KitchenQueueDao;
 import com.foodiehub.order_service.dao.OrderDao;
 import com.foodiehub.order_service.dao.OrderStateHistoryDao;
-import com.foodiehub.order_service.dto.CatalogRestaurantResponse;
 import com.foodiehub.order_service.model.KitchenQueue;
 import com.foodiehub.order_service.model.Order;
 import com.foodiehub.order_service.model.OrderStateHistory;
@@ -23,53 +21,56 @@ import java.util.UUID;
 @Slf4j
 public class KitchenQueuePromotionService {
 
-    private final KitchenQueueDao kitchenQueueDao;
-    private final OrderDao orderDao;
-    private final OrderStateHistoryDao orderStateHistoryDao;
+
+    private final KitchenQueueService kitchenQueueService;
 
     private final KitchenCapacityService kitchenCapacityService;
+
+    private final OrderDao orderDao;
+
+    private final OrderStateHistoryDao orderStateHistoryDao;
+
     private final CatalogClient catalogClient;
 
 
     /*
      * =========================================================
-     * 11.10.5 - AUTOMATIC FIFO PROMOTION
+     * 11.15 - FIFO KITCHEN QUEUE PROMOTION
      * =========================================================
      *
-     * Runs periodically and checks queued orders.
+     * Runs periodically and promotes queued ACCEPTED orders
+     * to PREPARING whenever kitchen capacity becomes available.
+     *
+     * FIFO is maintained per restaurant.
      */
     @Scheduled(
             fixedDelayString =
-                    "${kitchen.queue.promotion-interval-ms:5000}"
+                    "${order.kitchen-queue.promotion-interval-ms:5000}"
     )
+    @Transactional
     public void promoteQueuedOrders() {
 
-        /*
-         * Get queue entries in FIFO order.
-         */
-        List<KitchenQueue> queuedOrders =
-                kitchenQueueDao
-                        .findAllByOrderByQueuedAtAsc();
+        List<UUID> restaurantIds =
+                kitchenQueueService
+                        .findRestaurantsWithQueuedOrders();
 
-        for (KitchenQueue queueEntry :
-                queuedOrders) {
+        for (UUID restaurantId : restaurantIds) {
 
             try {
 
-                promoteOrderIfCapacityAvailable(
-                        queueEntry
+                promoteOrdersForRestaurant(
+                        restaurantId
                 );
 
-            } catch (Exception exception) {
+            } catch (RuntimeException exception) {
 
                 /*
-                 * One failed order should not stop the
-                 * promotion worker from processing the
-                 * remaining queue entries.
+                 * Do not allow one restaurant to stop
+                 * processing other restaurants.
                  */
                 log.error(
-                        "Failed to process queued order {}",
-                        queueEntry.getOrderId(),
+                        "Failed to promote kitchen queue for restaurant {}",
+                        restaurantId,
                         exception
                 );
             }
@@ -79,37 +80,34 @@ public class KitchenQueuePromotionService {
 
     /*
      * =========================================================
-     * PROCESS ONE QUEUED ORDER
+     * PROCESS ONE RESTAURANT
      * =========================================================
      */
-    @Transactional
-    public void promoteOrderIfCapacityAvailable(
-            KitchenQueue queueEntry
+    private void promoteOrdersForRestaurant(
+            UUID restaurantId
     ) {
-
-        UUID orderId =
-                queueEntry.getOrderId();
-
-        UUID restaurantId =
-                queueEntry.getRestaurantId();
-
 
         /*
          * -----------------------------------------------------
-         * 1. LOCK KITCHEN CAPACITY
+         * 1. Make sure synchronization row exists.
          * -----------------------------------------------------
-         *
-         * This is the synchronization point.
-         *
-         * Because this method is @Transactional and
-         * getLocked() does NOT start its own transaction,
-         * the pessimistic lock remains held until this
-         * method finishes.
          */
         kitchenCapacityService.ensureExists(
                 restaurantId
         );
 
+
+        /*
+         * -----------------------------------------------------
+         * 2. Lock the kitchen capacity row.
+         *
+         * Every capacity-sensitive ACCEPTED -> PREPARING
+         * transition uses this same row.
+         *
+         * This prevents concurrent workers from exceeding
+         * MaxConcurrentOrders.
+         * -----------------------------------------------------
+         */
         kitchenCapacityService.getLocked(
                 restaurantId
         );
@@ -117,64 +115,10 @@ public class KitchenQueuePromotionService {
 
         /*
          * -----------------------------------------------------
-         * 2. LOCK THE ORDER
+         * 3. Get restaurant configuration.
          * -----------------------------------------------------
          */
-        Order order =
-                orderDao
-                        .findByIdForUpdate(
-                                orderId
-                        )
-                        .orElse(null);
-
-
-        /*
-         * The order no longer exists.
-         *
-         * Remove the stale queue entry.
-         */
-        if (order == null) {
-
-            kitchenQueueDao.deleteByOrderId(
-                    orderId
-            );
-
-            return;
-        }
-
-
-        /*
-         * -----------------------------------------------------
-         * 3. VERIFY ORDER IS STILL ACCEPTED
-         * -----------------------------------------------------
-         *
-         * The order may have been cancelled while waiting.
-         *
-         * Example:
-         *
-         * ACCEPTED
-         *    ↓
-         * CANCELLED
-         *
-         * In that case it must not be promoted.
-         */
-        if (order.getStatus()
-                != OrderStatus.ACCEPTED) {
-
-            kitchenQueueDao.deleteByOrderId(
-                    orderId
-            );
-
-            return;
-        }
-
-
-        /*
-         * -----------------------------------------------------
-         * 4. GET RESTAURANT CAPACITY
-         * -----------------------------------------------------
-         */
-        CatalogRestaurantResponse restaurant =
+        var restaurant =
                 catalogClient.getRestaurant(
                         restaurantId
                 );
@@ -186,16 +130,19 @@ public class KitchenQueuePromotionService {
         if (maxConcurrentOrders == null
                 || maxConcurrentOrders < 1) {
 
-            throw new IllegalStateException(
-                    "Invalid kitchen capacity configured for restaurant: "
-                            + restaurantId
+            log.error(
+                    "Invalid kitchen capacity {} for restaurant {}",
+                    maxConcurrentOrders,
+                    restaurantId
             );
+
+            return;
         }
 
 
         /*
          * -----------------------------------------------------
-         * 5. COUNT CURRENT PREPARING ORDERS
+         * 4. Count currently PREPARING orders.
          * -----------------------------------------------------
          */
         int preparingOrders =
@@ -209,13 +156,15 @@ public class KitchenQueuePromotionService {
 
         /*
          * -----------------------------------------------------
-         * 6. KITCHEN STILL FULL
+         * 5. Calculate available kitchen slots.
          * -----------------------------------------------------
-         *
-         * Leave the order in the queue.
          */
-        if (preparingOrders
-                >= maxConcurrentOrders) {
+        int availableSlots =
+                maxConcurrentOrders
+                        - preparingOrders;
+
+
+        if (availableSlots <= 0) {
 
             return;
         }
@@ -223,10 +172,144 @@ public class KitchenQueuePromotionService {
 
         /*
          * -----------------------------------------------------
-         * 7. PROMOTE ORDER
+         * 6. Get queued orders in FIFO order.
          * -----------------------------------------------------
+         */
+        List<KitchenQueue> queuedOrders =
+                kitchenQueueService
+                        .getQueuedOrders(
+                                restaurantId
+                        );
+
+
+        if (queuedOrders.isEmpty()) {
+
+            return;
+        }
+
+
+        /*
+         * -----------------------------------------------------
+         * 7. Promote orders until capacity is full.
+         * -----------------------------------------------------
+         */
+        int promotedCount = 0;
+
+        for (KitchenQueue queueEntry : queuedOrders) {
+
+            if (promotedCount >= availableSlots) {
+                break;
+            }
+
+            boolean promoted =
+                    promoteSingleOrder(
+                            queueEntry,
+                            restaurantId
+                    );
+
+            if (promoted) {
+
+                promotedCount++;
+            }
+        }
+
+
+        if (promotedCount > 0) {
+
+            log.info(
+                    "Promoted {} queued orders to PREPARING for restaurant {}",
+                    promotedCount,
+                    restaurantId
+            );
+        }
+    }
+
+
+    /*
+     * =========================================================
+     * PROMOTE SINGLE ORDER
+     * =========================================================
+     */
+    private boolean promoteSingleOrder(
+            KitchenQueue queueEntry,
+            UUID restaurantId
+    ) {
+
+        UUID orderId =
+                queueEntry.getOrderId();
+
+
+        /*
+         * -----------------------------------------------------
+         * Lock the order.
+         * -----------------------------------------------------
+         */
+        Order order =
+                orderDao
+                        .findByIdForUpdate(
+                                orderId
+                        )
+                        .orElse(null);
+
+
+        /*
+         * Order may have been cancelled/deleted after the
+         * queue snapshot was created.
+         */
+        if (order == null) {
+
+            kitchenQueueService.remove(
+                    orderId
+            );
+
+            return false;
+        }
+
+
+        /*
+         * -----------------------------------------------------
+         * Make sure queue and order belong to same restaurant.
+         * -----------------------------------------------------
+         */
+        if (!restaurantId.equals(
+                order.getRestaurantId()
+        )) {
+
+            log.warn(
+                    "Queue restaurant mismatch for order {}",
+                    orderId
+            );
+
+            kitchenQueueService.remove(
+                    orderId
+            );
+
+            return false;
+        }
+
+
+        /*
+         * -----------------------------------------------------
+         * Only ACCEPTED orders can be promoted.
          *
-         * ACCEPTED → PREPARING
+         * If the order was cancelled or otherwise changed
+         * while waiting, simply remove the stale queue entry.
+         * -----------------------------------------------------
+         */
+        if (order.getStatus() != OrderStatus.ACCEPTED) {
+
+            kitchenQueueService.remove(
+                    orderId
+            );
+
+            return false;
+        }
+
+
+        /*
+         * -----------------------------------------------------
+         * ACCEPTED -> PREPARING
+         * -----------------------------------------------------
          */
         OrderStatus previousStatus =
                 order.getStatus();
@@ -242,23 +325,15 @@ public class KitchenQueuePromotionService {
 
         /*
          * -----------------------------------------------------
-         * 8. CREATE STATE HISTORY
+         * Record state transition.
          * -----------------------------------------------------
          */
         OrderStateHistory history =
                 OrderStateHistory.builder()
-                        .orderId(
-                                order.getId()
-                        )
-                        .fromStatus(
-                                previousStatus
-                        )
-                        .toStatus(
-                                OrderStatus.PREPARING
-                        )
-                        .changedBy(
-                                null
-                        )
+                        .orderId(orderId)
+                        .fromStatus(previousStatus)
+                        .toStatus(OrderStatus.PREPARING)
+                        .changedBy(null)
                         .reason(
                                 "Automatically promoted from kitchen queue"
                         )
@@ -271,21 +346,20 @@ public class KitchenQueuePromotionService {
 
         /*
          * -----------------------------------------------------
-         * 9. REMOVE FROM QUEUE
+         * Remove from FIFO queue.
          * -----------------------------------------------------
-         *
-         * Only remove after successfully changing
-         * the order to PREPARING.
          */
-        kitchenQueueDao.deleteByOrderId(
+        kitchenQueueService.remove(
                 orderId
         );
 
 
         log.info(
-                "Queued order {} promoted to PREPARING for restaurant {}",
+                "Kitchen queue order {} promoted to PREPARING for restaurant {}",
                 orderId,
                 restaurantId
         );
+
+        return true;
     }
 }

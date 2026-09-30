@@ -896,15 +896,6 @@ public class OrderService {
         );
 
 
-        /*
-         * When PREPARING -> READY_FOR_PICKUP
-         * or PREPARING -> CANCELLED happens,
-         * a kitchen slot becomes available.
-         *
-         * KitchenQueuePromotionService handles
-         * the queued order automatically.
-         */
-
         return mapToResponse(
                 order
         );
@@ -1002,7 +993,7 @@ public class OrderService {
 
 
     // =========================================================
-    // CUSTOMER CANCELLATION
+    // 11.14 - CUSTOMER CANCELLATION
     // =========================================================
 
     @Transactional
@@ -1012,10 +1003,18 @@ public class OrderService {
             String reason
     ) {
 
+        /*
+         * IMPORTANT:
+         * Lock the order before reading its status.
+         *
+         * This prevents two concurrent cancellation requests
+         * from both observing the same active status.
+         */
         Order order =
-                getOrderEntity(
+                getOrderEntityForUpdate(
                         orderId
                 );
+
 
         /*
          * 1. Customer can cancel only their own order.
@@ -1094,53 +1093,32 @@ public class OrderService {
 
 
         /*
-         * 6. Restore stock.
+         * 6. Restore stock only for:
+         *
+         * PLACED
+         * ACCEPTED
          */
         if (shouldRestoreStock(currentStatus)) {
-            restoreOrderStock(order, orderId);
+
+            restoreOrderStock(
+                    order,
+                    orderId
+            );
         }
 
+
         /*
-         * 7. Change order state.
+         * 7. Change order status + save state history.
          */
-        order.setStatus(
-                OrderStatus.CANCELLED
-        );
-
-        orderDao.save(
-                order
-        );
-
-
-        /*
-         * 8. Save state history.
-         */
-        OrderStateHistory history =
-                OrderStateHistory.builder()
-                        .orderId(
-                                order.getId()
-                        )
-                        .fromStatus(
-                                currentStatus
-                        )
-                        .toStatus(
-                                OrderStatus.CANCELLED
-                        )
-                        .changedBy(
-                                customerId
-                        )
-                        .reason(
-                                reason
-                        )
-                        .build();
-
-        orderStateHistoryDao.save(
-                history
+        markOrderCancelled(
+                order,
+                customerId,
+                reason
         );
 
 
         /*
-         * If this order was waiting in the kitchen queue,
+         * 8. If this order was waiting in the kitchen queue,
          * remove it.
          */
         kitchenQueueService.remove(
@@ -1188,7 +1166,7 @@ public class OrderService {
 
 
     // =========================================================
-    // RESTAURANT CANCELLATION
+    // 11.14 - RESTAURANT CANCELLATION
     // =========================================================
 
     @Transactional
@@ -1198,8 +1176,11 @@ public class OrderService {
             String reason
     ) {
 
+        /*
+         * Lock the order before reading its status.
+         */
         Order order =
-                getOrderEntity(
+                getOrderEntityForUpdate(
                         orderId
                 );
 
@@ -1308,54 +1289,32 @@ public class OrderService {
 
 
         /*
-         * 8. Restore stock.
+         * 8. Restore stock only for:
+         *
+         * PLACED
+         * ACCEPTED
          */
         if (shouldRestoreStock(currentStatus)) {
-            restoreOrderStock(order, orderId);
+
+            restoreOrderStock(
+                    order,
+                    orderId
+            );
         }
 
 
         /*
-         * 9. Change order status.
+         * 9. Change order status + save state history.
          */
-        order.setStatus(
-                OrderStatus.CANCELLED
-        );
-
-        orderDao.save(
-                order
+        markOrderCancelled(
+                order,
+                restaurantOwnerId,
+                reason
         );
 
 
         /*
-         * 10. Save state history.
-         */
-        OrderStateHistory history =
-                OrderStateHistory.builder()
-                        .orderId(
-                                order.getId()
-                        )
-                        .fromStatus(
-                                currentStatus
-                        )
-                        .toStatus(
-                                OrderStatus.CANCELLED
-                        )
-                        .changedBy(
-                                restaurantOwnerId
-                        )
-                        .reason(
-                                reason
-                        )
-                        .build();
-
-        orderStateHistoryDao.save(
-                history
-        );
-
-
-        /*
-         * If the order was waiting in the kitchen queue,
+         * 10. If the order was waiting in the kitchen queue,
          * remove it.
          */
         kitchenQueueService.remove(
@@ -1369,7 +1328,7 @@ public class OrderService {
 
 
     // =========================================================
-    // SYSTEM CANCELLATION
+    // 11.14 - SYSTEM CANCELLATION
     // =========================================================
 
     @Transactional
@@ -1378,8 +1337,11 @@ public class OrderService {
             String reason
     ) {
 
+        /*
+         * Lock the order before reading its status.
+         */
         Order order =
-                getOrderEntity(
+                getOrderEntityForUpdate(
                         orderId
                 );
 
@@ -1450,48 +1412,27 @@ public class OrderService {
 
 
         /*
-         * Restore stock.
+         * Restore stock only for:
+         *
+         * PLACED
+         * ACCEPTED
          */
         if (shouldRestoreStock(currentStatus)) {
-            restoreOrderStock(order, orderId);
+
+            restoreOrderStock(
+                    order,
+                    orderId
+            );
         }
 
-        /*
-         * Change order status.
-         */
-        order.setStatus(
-                OrderStatus.CANCELLED
-        );
-
-        orderDao.save(
-                order
-        );
-
 
         /*
-         * Save state history.
+         * Change order status + save state history.
          */
-        OrderStateHistory history =
-                OrderStateHistory.builder()
-                        .orderId(
-                                order.getId()
-                        )
-                        .fromStatus(
-                                currentStatus
-                        )
-                        .toStatus(
-                                OrderStatus.CANCELLED
-                        )
-                        .changedBy(
-                                null
-                        )
-                        .reason(
-                                reason
-                        )
-                        .build();
-
-        orderStateHistoryDao.save(
-                history
+        markOrderCancelled(
+                order,
+                null,
+                reason
         );
 
 
@@ -1623,24 +1564,66 @@ public class OrderService {
                         .size();
 
 
-        /*
-         * Example:
-         *
-         * capacity = 3
-         * preparing = 2
-         *
-         * 2 < 3 → capacity available
-         *
-         * capacity = 3
-         * preparing = 3
-         *
-         * 3 < 3 → capacity unavailable
-         */
         return preparingOrders
                 < maxConcurrentOrders;
     }
-    private boolean shouldRestoreStock(OrderStatus status) {
+
+
+    // =========================================================
+    // 11.13 - STOCK RESTORATION RULE
+    // =========================================================
+
+    private boolean shouldRestoreStock(
+            OrderStatus status
+    ) {
+
         return status == OrderStatus.PLACED
                 || status == OrderStatus.ACCEPTED;
+    }
+
+
+    // =========================================================
+    // 11.14 - COMMON CANCELLATION
+    // =========================================================
+
+    private void markOrderCancelled(
+            Order order,
+            UUID changedBy,
+            String reason
+    ) {
+
+        OrderStatus previousStatus =
+                order.getStatus();
+
+        order.setStatus(
+                OrderStatus.CANCELLED
+        );
+
+        orderDao.save(
+                order
+        );
+
+        OrderStateHistory history =
+                OrderStateHistory.builder()
+                        .orderId(
+                                order.getId()
+                        )
+                        .fromStatus(
+                                previousStatus
+                        )
+                        .toStatus(
+                                OrderStatus.CANCELLED
+                        )
+                        .changedBy(
+                                changedBy
+                        )
+                        .reason(
+                                reason
+                        )
+                        .build();
+
+        orderStateHistoryDao.save(
+                history
+        );
     }
 }
