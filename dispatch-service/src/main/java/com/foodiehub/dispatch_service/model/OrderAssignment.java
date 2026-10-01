@@ -41,6 +41,9 @@ public class OrderAssignment {
     @Column(nullable = false, length = 20)
     private AssignmentStatus status;
 
+    @Column(name = "attempt_number", nullable = false)
+    private Integer attemptNumber;
+
     @Column(name = "offered_at", nullable = false)
     private LocalDateTime offeredAt;
 
@@ -67,6 +70,10 @@ public class OrderAssignment {
 
         if (offeredAt == null) {
             offeredAt = now;
+        }
+
+        if (attemptNumber == null) {
+            attemptNumber = 1;
         }
     }
 }

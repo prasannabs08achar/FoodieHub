@@ -152,9 +152,13 @@ public class AssignmentService {
                 assignment.getId(),
                 assignment.getOrderId(),
                 assignment.getAgentId(),
-                agent.getUserId(),
+                null,
                 assignment.getStatus(),
-                assignment.getRespondedAt()
+                assignment.getAttemptNumber(),
+                assignment.getOfferedAt(),
+                assignment.getExpiresAt(),
+                assignment.getRespondedAt(),
+                assignment.getReason()
         );
     }
     private OrderAssignment getActiveAssignment(

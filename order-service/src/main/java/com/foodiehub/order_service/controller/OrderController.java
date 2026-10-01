@@ -131,5 +131,12 @@ public class OrderController {
                 )
         );
     }
+    @GetMapping("/internal/ready-for-pickup")
+    public ResponseEntity<List<OrderResponse>> getReadyForPickupOrders() {
+
+        return ResponseEntity.ok(
+                orderService.getReadyForPickupOrders()
+        );
+    }
 
 }

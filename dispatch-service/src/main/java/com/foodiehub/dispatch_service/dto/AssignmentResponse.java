@@ -11,6 +11,11 @@ public record AssignmentResponse(
         UUID agentId,
         UUID agentUserId,
         AssignmentStatus status,
-        LocalDateTime assignedAt
+        Integer attemptNumber,
+        LocalDateTime offeredAt,
+        LocalDateTime expiresAt,
+        LocalDateTime respondedAt,
+        String reason
 ) {
+
 }

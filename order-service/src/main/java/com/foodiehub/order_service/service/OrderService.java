@@ -514,6 +514,15 @@ public class OrderService {
         }
     }
 
+    @Transactional(readOnly = true)
+    public List<OrderResponse> getReadyForPickupOrders() {
+
+        return orderDao
+                .findByStatus(OrderStatus.READY_FOR_PICKUP)
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
+    }
 
     private static OrderIdempotencyRecord
     getOrderIdempotencyRecord(
