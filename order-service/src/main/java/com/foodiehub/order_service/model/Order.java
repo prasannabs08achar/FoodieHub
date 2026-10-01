@@ -5,6 +5,7 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
@@ -59,6 +60,9 @@ public class Order {
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    @Column(name = "predicted_ready_at")
+    private LocalDateTime predictedReadyAt;
 
     @PrePersist
     protected void onCreate() {

@@ -4,7 +4,6 @@ import com.foodiehub.dispatch_service.dto.AssignmentDecisionRequest;
 import com.foodiehub.dispatch_service.dto.AssignmentResponse;
 import com.foodiehub.dispatch_service.service.AgentAssignmentService;
 import com.foodiehub.dispatch_service.service.AssignmentService;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,20 +18,13 @@ public class AssignmentController {
     private final AgentAssignmentService agentAssignmentService;
     private final AssignmentService assignmentService;
 
-    /*
-     * Manual trigger.
-     *
-     * Useful for Postman testing and debugging.
-     */
     @PostMapping("/orders/{orderId}")
     public ResponseEntity<AssignmentResponse> assignOrder(
             @PathVariable UUID orderId
     ) {
 
         return ResponseEntity.ok(
-                agentAssignmentService.assignOrder(
-                        orderId
-                )
+                agentAssignmentService.assignOrder(orderId)
         );
     }
 
@@ -54,8 +46,9 @@ public class AssignmentController {
     public ResponseEntity<AssignmentResponse> declineOffer(
             @PathVariable UUID orderId,
             @RequestHeader("X-User-Id") UUID agentUserId,
-            @RequestBody(required = false)
-            AssignmentDecisionRequest request
+            @RequestBody(
+                    required = false
+            ) AssignmentDecisionRequest request
     ) {
 
         String reason =

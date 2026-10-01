@@ -46,4 +46,13 @@ public class GlobalExceptionHandler {
                 ex.getMessage()
         );
     }
+    @ExceptionHandler(BatchLifecycleException.class)
+    public ResponseEntity<String> handleBatchLifecycleException(
+            BatchLifecycleException ex
+    ) {
+
+        return ResponseEntity
+                .badRequest()
+                .body(ex.getMessage());
+    }
 }

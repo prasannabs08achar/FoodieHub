@@ -59,6 +59,31 @@ public class AgentScoringConfigService {
             AgentScoringConfigRequest request
     ) {
 
+        if (request == null
+                || request.distanceWeight() == null
+                || request.loadWeight() == null
+                || request.acceptanceWeight() == null
+                || request.idleTimeWeight() == null) {
+
+            throw new IllegalArgumentException(
+                    "All agent scoring weights are required"
+            );
+        }
+
+        if (request.distanceWeight()
+                .compareTo(BigDecimal.ZERO) < 0
+                || request.loadWeight()
+                .compareTo(BigDecimal.ZERO) < 0
+                || request.acceptanceWeight()
+                .compareTo(BigDecimal.ZERO) < 0
+                || request.idleTimeWeight()
+                .compareTo(BigDecimal.ZERO) < 0) {
+
+            throw new IllegalArgumentException(
+                    "Agent scoring weights cannot be negative"
+            );
+        }
+
         BigDecimal total =
                 request.distanceWeight()
                         .add(request.loadWeight())
@@ -66,12 +91,12 @@ public class AgentScoringConfigService {
                         .add(request.idleTimeWeight());
 
         if (total.compareTo(REQUIRED_TOTAL) != 0) {
+
             throw new IllegalArgumentException(
                     "Agent scoring weights must sum to 1.0"
             );
         }
     }
-
     private AgentScoringConfigResponse mapToResponse(
             AgentScoringConfig config
     ) {

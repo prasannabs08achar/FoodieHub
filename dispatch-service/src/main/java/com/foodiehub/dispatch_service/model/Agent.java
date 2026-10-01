@@ -76,6 +76,8 @@ public class Agent {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "assignment_cooldown_until")
+    private Instant assignmentCooldownUntil;
     @PrePersist
     protected void onCreate() {
 

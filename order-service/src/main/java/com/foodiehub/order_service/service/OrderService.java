@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.foodiehub.order_service.client.CatalogClient;
 import com.foodiehub.order_service.client.DispatchClient;
 import com.foodiehub.order_service.client.WalletClient;
+import com.foodiehub.order_service.config.PreparationProperties;
 import com.foodiehub.order_service.dao.*;
 import com.foodiehub.order_service.dto.*;
 import com.foodiehub.order_service.exception.CartNotFoundException;
@@ -18,6 +19,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -48,6 +50,7 @@ public class OrderService {
     private final OrderDao orderDao;
     private final OrderItemDao orderItemDao;
     private final OrderStateHistoryDao orderStateHistoryDao;
+    private final PreparationProperties preparationProperties;
 
     private final OrderIdempotencyRecordDao orderIdempotencyRecordDao;
 
@@ -367,14 +370,19 @@ public class OrderService {
                             .status(
                                     OrderStatus.PLACED
                             )
+                            .predictedReadyAt(
+                                    LocalDateTime.now()
+                                            .plusMinutes(
+                                                    preparationProperties
+                                                            .getDefaultPreparationMinutes()
+                                            )
+                            )
                             .build();
 
             order =
                     orderDao.save(
                             order
                     );
-
-
             /*
              * Create OrderItems using the server-side
              * Catalog prices.
@@ -517,9 +525,43 @@ public class OrderService {
     @Transactional(readOnly = true)
     public List<OrderResponse> getReadyForPickupOrders() {
 
+        LocalDateTime now =
+                LocalDateTime.now();
+
+        LocalDateTime lookaheadLimit =
+                now.plusMinutes(5);
+
         return orderDao
-                .findByStatus(OrderStatus.READY_FOR_PICKUP)
+                .findByStatusInOrderByCreatedAtAsc(
+                        List.of(
+                                OrderStatus.READY_FOR_PICKUP,
+                                OrderStatus.PREPARING
+                        )
+                )
                 .stream()
+                .filter(order -> {
+
+                    if (order.getStatus()
+                            == OrderStatus.READY_FOR_PICKUP) {
+
+                        return true;
+                    }
+
+                    if (order.getStatus()
+                            == OrderStatus.PREPARING) {
+
+                        LocalDateTime predictedReadyAt =
+                                order.getPredictedReadyAt();
+
+                        return predictedReadyAt != null
+                                && !predictedReadyAt.isBefore(now)
+                                && !predictedReadyAt.isAfter(
+                                lookaheadLimit
+                        );
+                    }
+
+                    return false;
+                })
                 .map(this::mapToResponse)
                 .toList();
     }
@@ -966,6 +1008,7 @@ public class OrderService {
                 order.getStatus(),
                 items,
                 history,
+                order.getPredictedReadyAt(),
                 order.getCreatedAt(),
                 order.getUpdatedAt()
         );

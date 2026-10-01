@@ -59,6 +59,11 @@ public class AgentScoringService {
                 continue;
             }
 
+            if (agent.getAssignmentCooldownUntil() != null
+                    && Instant.now().isBefore(agent.getAssignmentCooldownUntil())) {
+                continue;
+            }
+
             if (agent.getCurrentLatitude() == null
                     || agent.getCurrentLongitude() == null) {
                 continue;
@@ -149,13 +154,10 @@ public class AgentScoringService {
 
         long activeAssignments =
                 orderAssignmentDao
-                        .findByAgentId(agent.getId())
-                        .stream()
-                        .filter(assignment ->
-                                assignment.getStatus()
-                                        == AssignmentStatus.ACCEPTED
-                        )
-                        .count();
+                        .countByAgentIdAndStatusAndCompletedAtIsNull(
+                                agent.getId(),
+                                AssignmentStatus.ACCEPTED
+                        );
 
         return ONE
                 .divide(
@@ -168,7 +170,6 @@ public class AgentScoringService {
                         RoundingMode.HALF_UP
                 );
     }
-
     private BigDecimal calculateAcceptanceScore(
             Agent agent
     ) {
@@ -189,6 +190,8 @@ public class AgentScoringService {
                                         == AssignmentStatus.ACCEPTED
                                         || assignment.getStatus()
                                         == AssignmentStatus.DECLINED
+                                        || assignment.getStatus()
+                                        == AssignmentStatus.EXPIRED
                         )
                         .count();
 

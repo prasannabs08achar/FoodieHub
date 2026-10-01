@@ -17,6 +17,10 @@ import java.util.UUID;
                 @Index(
                         name = "idx_order_assignment_agent_id",
                         columnList = "agent_id"
+                ),
+                @Index(
+                        name = "idx_order_assignment_status",
+                        columnList = "status"
                 )
         }
 )
@@ -53,6 +57,16 @@ public class OrderAssignment {
     @Column(name = "expires_at")
     private LocalDateTime expiresAt;
 
+    /*
+     * Represents completion of the delivery handled by
+     * this accepted assignment.
+     *
+     * AssignmentStatus remains ACCEPTED because the
+     * assignment history itself is still an accepted offer.
+     */
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
     @Column(length = 500)
     private String reason;
 
@@ -62,7 +76,8 @@ public class OrderAssignment {
     @PrePersist
     protected void onCreate() {
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now =
+                LocalDateTime.now();
 
         if (createdAt == null) {
             createdAt = now;

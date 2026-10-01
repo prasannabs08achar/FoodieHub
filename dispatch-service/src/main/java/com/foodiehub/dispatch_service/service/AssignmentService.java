@@ -106,6 +106,13 @@ public class AssignmentService {
                         "Order picked up by assigned agent"
                 )
         );
+        assignment.setCompletedAt(
+                LocalDateTime.now()
+        );
+
+        orderAssignmentDao.save(
+                assignment
+        );
     }
 
     @Transactional

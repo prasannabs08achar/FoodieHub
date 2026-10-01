@@ -36,4 +36,7 @@ public interface OrderDao extends JpaRepository<Order, UUID> {
             @Param("orderId") UUID orderId
     );
     List<Order> findByStatus(OrderStatus status);
+    List<Order> findByStatusInOrderByCreatedAtAsc(
+            List<OrderStatus> statuses
+    );
 }
