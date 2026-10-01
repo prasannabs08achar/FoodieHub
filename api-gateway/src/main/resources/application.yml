@@ -1,0 +1,80 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+
+            # ==========================
+            # AUTH SERVICE
+            # ==========================
+            - id: auth-service
+              uri: lb://auth-service
+              predicates:
+                - Path=/api/auth/**
+
+            # ==========================
+            # WALLET SERVICE
+            # ==========================
+            - id: wallet-service
+              uri: lb://wallet-service
+              predicates:
+                - Path=/api/wallet/**
+
+            # ==========================
+            # CATALOG SERVICE
+            # ==========================
+            - id: catalog-service
+              uri: lb://catalog-service
+              predicates:
+                - Path=/api/catalog/**
+
+            # ==========================
+            # ORDER SERVICE
+            # ==========================
+            - id: order-service
+              uri: lb://order-service
+              predicates:
+                - Path=/api/orders/**
+
+            # ==========================
+            # DISPATCH SERVICE
+            # ==========================
+            - id: dispatch-server
+              uri: lb://dispatch-server
+              predicates:
+                - Path=/api/dispatch/**
+
+      discovery:
+        locator:
+          enabled: false
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+
+    register-with-eureka: true
+    fetch-registry: true
+
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          - health
+          - info
+          - metrics
+
+  endpoint:
+    health:
+      show-details: always
